@@ -13,12 +13,11 @@ dependencies = [
     "jsonschema>=4.20",
     "Jinja2>=3.1",
     "jsonpath-ng>=1.6",
+    "requests>=2.31",          # http 直连工具
 ]
 
-# 工具依赖：按需安装。direct tools 直连库（不走 MCP）。
-# 说明：具体依赖随各工具实现落地调整，此处为初版占位。
+# 直连工具的重依赖随后按工具拆成独立 extra（如 paramiko / playwright / 数据库连接器）
 [project.optional-dependencies]
-tools = ["requests>=2.31"]
 dev = ["pytest>=9.0"]
 
 [project.scripts]

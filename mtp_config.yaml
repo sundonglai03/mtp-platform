@@ -4,6 +4,82 @@
 # - 不放明文凭据（凭据只通过环境变量注入）；
 # - 不写死本机绝对路径（机器相关的值写 ${VAR:-默认}）；
 # - 相对路径按「项目根」解析（默认当前工作目录，可用 MTP_ROOT 覆盖）。
+#
+# 说明：执行链路**不走 MCP**，这里的白名单/限额直接作用于 tools/ 下的直连工具。
+
+security:
+  # 走代理的环境里，本地/内网被测目标不应该被代理接管（否则会拿到 502）。
+  # loopback 永远绕过；这里再补充内网网段。用例可写 args.use_proxy: true 强制走代理。
+  http_no_proxy:
+    - "127.0.0.1"
+    - "localhost"
+    - "::1"
+    - "192.168.*"
+    - "10.*"
+    - "172.16.*"
+  # SSH 允许的目标（精确 IP / IPv6 / 域名，支持 fnmatch 通配）；空列表 = 全部拒绝。
+  ssh_allow_hosts:
+    - "127.0.0.1"
+    - "192.168.*"
+    - "10.*"
+    - "172.16.*"
+  # 是否允许用例用 `allow_any_host: true` 自行豁免白名单（默认 false）。
+  ssh_allow_any_host: false
+  # MySQL 允许的连接主机
+  mysql_allow_hosts:
+    - "127.0.0.1"
+    - "localhost"
+  # 禁止连接的库名（生产库兜底防线）
+  mysql_deny_databases:
+    - gkpt
+    - production
+    - prod
+    - master
+  # 单条写 SQL 允许影响的最大行数
+  mysql_max_affected_rows: 1000
+  # 写操作默认需要用 --allow-write 显式放行
+  mysql_require_write_consent: true
+  # api 步骤允许上传的本地目录（相对项目根或绝对路径），resolve() 后做包含校验。
+  # 设为 [] 表示禁止一切上传。
+  api_upload_roots:
+    - "fixtures"
+    - "artifacts"
+    - "cases"
+  # api download 的落盘根目录；缺省 = 证据目录（artifacts）
+  api_download_root: "artifacts"
+  # api 允许访问的目标主机（fnmatch 通配，只比主机名不含端口）。
+  # 不配（注释掉）= 只挡云元数据/链路本地这类地址，内网被测服务照常可连；
+  # 配了 = 白名单模式，不在列表内一律拒绝；配成 [] = 全部拒绝。
+  # 重定向的每一跳都会重新校验。
+  # api_allow_hosts:
+  #   - "127.0.0.1"
+  #   - "localhost"
+  #   - "192.168.*"
+  # 是否允许用例用 `allow_any_host: true` 自行豁免上面的白名单（默认 false）
+  api_allow_any_host: false
+  # 单个响应最多读多少字节（默认 5 MiB）；超限直接断开，不读完整个响应体
+  api_max_response_bytes: 5242880
+  # 最多跟随多少次重定向（默认 5）
+  api_max_redirects: 5
+  # 脱敏字段名（大小写不敏感，命中即替换为 placeholder）
+  redact_keys:
+    - password
+    - passwd
+    - pwd
+    - token
+    - access_token
+    - refresh_token
+    - cookie
+    - set-cookie
+    - authorization
+    - secret
+    - api_key
+    - apikey
+    - private_key
+    - session
+    - credential
+    - credentials
+  redact_placeholder: "***REDACTED***"
 
 evidence:
   root: artifacts            # 产物/证据根目录（可用 MTP_ARTIFACT_ROOT 覆盖）
@@ -11,13 +87,4 @@ evidence:
 
 reporting: {}                # output_dir / history_file 缺省跟随 evidence.root
 
-security: {}                 # 缺省使用内置脱敏键；写操作默认拦截
-
 runner: {}                   # 步骤超时 / 重试等默认值
-
-# 直连工具的配置（执行链路不走 MCP）。各工具落地后按需补：
-# tools:
-#   ssh: { hosts: [...] }
-#   mysql: { allow_hosts: [...], max_affected_rows: 100 }
-#   http: { allow_hosts: null }
-tools: {}

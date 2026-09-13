@@ -325,14 +325,12 @@ dependencies = [
     { name = "jsonpath-ng" },
     { name = "jsonschema" },
     { name = "pyyaml" },
+    { name = "requests" },
 ]
 
 [package.optional-dependencies]
 dev = [
     { name = "pytest" },
-]
-tools = [
-    { name = "requests" },
 ]
 
 [package.metadata]
@@ -342,9 +340,9 @@ requires-dist = [
     { name = "jsonschema", specifier = ">=4.20" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0" },
     { name = "pyyaml", specifier = ">=6.0" },
-    { name = "requests", marker = "extra == 'tools'", specifier = ">=2.31" },
+    { name = "requests", specifier = ">=2.31" },
 ]
-provides-extras = ["tools", "dev"]
+provides-extras = ["dev"]
 
 [[package]]
 name = "packaging"
