@@ -1,0 +1,23 @@
+# mtp-platform 配置（仓库版）
+#
+# 原则：
+# - 不放明文凭据（凭据只通过环境变量注入）；
+# - 不写死本机绝对路径（机器相关的值写 ${VAR:-默认}）；
+# - 相对路径按「项目根」解析（默认当前工作目录，可用 MTP_ROOT 覆盖）。
+
+evidence:
+  root: artifacts            # 产物/证据根目录（可用 MTP_ARTIFACT_ROOT 覆盖）
+  retention_days: 14
+
+reporting: {}                # output_dir / history_file 缺省跟随 evidence.root
+
+security: {}                 # 缺省使用内置脱敏键；写操作默认拦截
+
+runner: {}                   # 步骤超时 / 重试等默认值
+
+# 直连工具的配置（执行链路不走 MCP）。各工具落地后按需补：
+# tools:
+#   ssh: { hosts: [...] }
+#   mysql: { allow_hosts: [...], max_affected_rows: 100 }
+#   http: { allow_hosts: null }
+tools: {}
