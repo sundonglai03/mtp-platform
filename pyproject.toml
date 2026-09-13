@@ -9,8 +9,8 @@ description = "自动化测试系统：接收规范用例，直连工具执行�
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "mtp-contracts==0.1.0",
     "PyYAML>=6.0",
+    "jsonschema>=4.20",
     "Jinja2>=3.1",
     "jsonpath-ng>=1.6",
 ]
@@ -18,9 +18,7 @@ dependencies = [
 # 工具依赖：按需安装。direct tools 直连库（不走 MCP）。
 # 说明：具体依赖随各工具实现落地调整，此处为初版占位。
 [project.optional-dependencies]
-tools = [
-    "requests>=2.31",
-]
+tools = ["requests>=2.31"]
 dev = ["pytest>=9.0"]
 
 [project.scripts]
@@ -28,6 +26,9 @@ mtp = "mtp_platform.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"mtp_platform.contracts" = ["case_schema.json", "_sync_manifest.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

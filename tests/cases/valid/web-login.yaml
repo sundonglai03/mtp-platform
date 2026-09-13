@@ -1,0 +1,185 @@
+schema_version: 1
+
+id: WEB-LOGIN-001
+title: 登录页凭据正确时登录成功并进入欢迎页
+description: >-
+  第一阶段验收用例。Playwright 驱动浏览器完成表单登录，MySQL 读取待登录用户并
+  校验数据准备结果；任一步失败都会自动截图，最终产出 JSON 与 JUnit XML。
+module: auth
+priority: P0
+tags: [smoke, web, login, acceptance]
+
+# ---------------------------------------------------------------------------
+# 环境与凭据
+# ---------------------------------------------------------------------------
+environment:
+  name: local
+  base_url: http://127.0.0.1:8099
+  db:
+    host: 127.0.0.1
+    port: 33306
+    user: mtp
+    database: mtp_test
+    # 只允许引用 secrets，校验器会拒绝明文
+    password: "{{ secrets.db_password }}"
+
+secrets:
+  db_password: MTP_DB_PASSWORD
+  login_password: MTP_LOGIN_PASSWORD
+
+variables:
+  username: tester
+  welcome_text: 欢迎
+
+timeout_sec: 180
+on_failure: abort
+
+# ---------------------------------------------------------------------------
+# 测试数据准备（需要 --allow-write）
+# ---------------------------------------------------------------------------
+fixtures:
+  - id: audit-start
+    description: 为本次运行写入一条审计记录，验证 run 隔离
+    action: mysql.insert
+    args:
+      table_name: login_audit
+      row:
+        run_id: "{{ run.id }}"
+        username: "{{ vars.username }}"
+        result: started
+    verify:
+      - id: audit-row-exists
+        type: db_value
+        actual: "{{ steps.audit-start }}"
+        expected: 1
+        args:
+          column: rows_affected
+        message: 审计记录应写入 1 行
+    cleanup:
+      action: mysql.delete
+      args:
+        table_name: login_audit
+        where:
+          run_id: "{{ run.id }}"
+
+# ---------------------------------------------------------------------------
+# 前置条件：确认数据库可用并读出待登录用户
+# ---------------------------------------------------------------------------
+preconditions:
+  - id: db-health
+    action: mysql.health_check
+    description: 确认测试库可连接
+    args:
+      credentials: "{{ env.db }}"
+    timeout_sec: 20
+    retry: 2
+    retry_delay_ms: 500
+
+  - id: load-user
+    action: mysql.query
+    description: 读取待登录用户
+    args:
+      sql: >-
+        SELECT username, display_name, status FROM demo_users
+        WHERE username = '{{ vars.username }}'
+      credentials: "{{ env.db }}"
+    timeout_sec: 20
+
+# ---------------------------------------------------------------------------
+# 主步骤
+# ---------------------------------------------------------------------------
+steps:
+  - id: open-login
+    action: playwright.navigate
+    description: 打开登录页
+    args:
+      url: "{{ env.base_url }}/login"
+    timeout_sec: 40
+
+  - id: fill-username
+    action: playwright.type
+    args:
+      element: 用户名输入框
+      target: "#username"
+      text: "{{ steps.load-user.rows[0].username }}"
+    timeout_sec: 20
+
+  - id: fill-password
+    action: playwright.type
+    args:
+      element: 密码输入框
+      target: "#password"
+      text: "{{ secrets.login_password }}"
+    timeout_sec: 20
+    evidence: [text]
+
+  - id: submit
+    action: playwright.click
+    args:
+      element: 登录按钮
+      target: "#login-form button[type=submit]"
+    timeout_sec: 20
+
+  - id: await-welcome
+    action: playwright.wait_for
+    description: 等待跳转到欢迎页
+    args:
+      text: "{{ vars.welcome_text }}"
+    timeout_sec: 25
+
+  - id: capture
+    action: playwright.screenshot
+    description: 留存成功页面截图
+    args:
+      filename: "welcome-{{ run.id }}.png"
+      fullPage: true
+      scale: css
+    timeout_sec: 30
+    on_failure: continue
+
+# ---------------------------------------------------------------------------
+# 断言
+# ---------------------------------------------------------------------------
+assertions:
+  - id: page-shows-welcome
+    type: page_text_contains
+    source: "{{ steps.await-welcome }}"
+    expected: "{{ vars.welcome_text }}"
+    message: 欢迎页应出现欢迎文案
+
+  - id: logout-visible
+    type: element_visible
+    source: "{{ steps.submit }}"
+    args:
+      target: "#logout"
+    message: 登录后应出现退出登录入口
+
+  - id: db-user-loaded
+    type: db_value
+    actual: "{{ steps.load-user }}"
+    expected: tester
+    args:
+      row: 0
+      column: username
+    message: 测试库应能读到 tester 用户
+
+  - id: all-login-signals
+    type: all
+    message: 欢迎文案与退出入口应同时成立
+    items:
+      - type: contains
+        actual: "{{ steps.await-welcome.page_text }}"
+        expected: "{{ vars.welcome_text }}"
+      - type: equals
+        actual: "{{ steps.load-user.rows[0].status }}"
+        expected: active
+
+# ---------------------------------------------------------------------------
+# 后置清理（无论成败都执行）
+# ---------------------------------------------------------------------------
+postconditions:
+  - id: close-browser
+    description: 关闭浏览器上下文
+    action: playwright.close
+    timeout_sec: 20
+    on_failure: continue

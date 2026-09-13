@@ -1,0 +1,68 @@
+schema_version: 1
+
+id: SSH-POLICY-001
+title: SSH 目标白名单拦截非授权主机
+description: >-
+  安全策略用例。目标主机不在 security.ssh_allow_hosts 内时必须被拒绝，且错误码
+  为 policy_denied；不需要真的存在 SSH 服务即可执行，适合放进 CI 冒烟。
+module: security
+priority: P0
+tags: [security, ssh, policy, smoke]
+
+environment:
+  name: local
+
+variables:
+  forbidden_host: 8.8.8.8
+
+timeout_sec: 60
+
+steps:
+  - id: blocked-host
+    action: ssh.execute
+    description: 尝试连接白名单外主机（策略必须在建连之前就拦下）
+    args:
+      command: "echo should-never-run"
+      host: "{{ vars.forbidden_host }}"
+      user: root
+    timeout_sec: 10
+    # 负向用例：这一步「失败」才是正确结果
+    expect_failure: true
+    on_failure: continue
+
+  - id: blank-host
+    action: ssh.execute
+    description: 未提供 host 也应被拒绝
+    args:
+      command: "echo should-never-run"
+      user: root
+    timeout_sec: 10
+    expect_failure: true
+    on_failure: continue
+
+assertions:
+  - id: forbidden-host-denied
+    type: equals
+    actual: "{{ steps.blocked-host.error.code }}"
+    expected: policy_denied
+    message: 白名单外主机必须被拒绝
+
+  - id: nothing-executed
+    type: equals
+    actual: "{{ steps.blocked-host.step_ok }}"
+    expected: false
+    message: 被拒绝的步骤不应标记为执行成功
+
+  - id: blank-host-refused
+    type: any
+    message: 未提供 host 时应报错（配置错误或策略拒绝）
+    items:
+      - type: equals
+        actual: "{{ steps.blank-host.error.code }}"
+        expected: config_error
+      - type: equals
+        actual: "{{ steps.blank-host.error.code }}"
+        expected: policy_denied
+      - type: equals
+        actual: "{{ steps.blank-host.error.code }}"
+        expected: tool_failed

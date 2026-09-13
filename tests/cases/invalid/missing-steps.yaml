@@ -1,0 +1,16 @@
+# 非法用例 1：结构不完整
+# 期望：被结构校验拦下，报错路径指向 steps 字段
+schema_version: 1
+
+id: INVALID-NO-STEPS
+title: 缺少 steps 的用例
+module: demo
+priority: P2
+tags: [invalid]
+
+environment:
+  name: local
+
+description: >-
+  这个用例没有 steps 字段。执行器必须在加载阶段就拒绝它，
+  而不是跑起来之后才发现「没有任何步骤」，那样会产出一个假的「通过」。

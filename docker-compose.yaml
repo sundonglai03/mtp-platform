@@ -1,0 +1,15 @@
+# 自动化测试系统（独立部署，不与 contracts-mcp 共用 compose）
+services:
+  mtp-platform:
+    build: .
+    image: mtp-platform:0.1.0
+    working_dir: /app
+    environment:
+      # 产物落卷，不污染镜像层
+      MTP_ARTIFACT_ROOT: /app/artifacts
+    volumes:
+      - ./artifacts:/app/artifacts
+      # 用例与配置挂进来（示例，按需调整）
+      - ./tests/cases:/app/cases:ro
+    # 默认跑一次校验；实际测试用 `docker compose run --rm mtp-platform run <cases>`
+    command: ["validate", "/app/cases/valid"]

@@ -1,0 +1,39 @@
+# 非法用例 2：变量引用错误
+# 期望：语义校验逐条报出
+#   - steps.nope 引用了不存在的步骤
+#   - vars.undefined 引用了未声明的变量
+#   - foo.bar 使用了未知命名空间
+#   - steps.a.b.c..d 格式非法
+schema_version: 1
+
+id: INVALID-BAD-REFS
+title: 变量引用错误的用例
+module: demo
+priority: P2
+tags: [invalid]
+
+environment:
+  name: local
+  base_url: http://127.0.0.1:8099
+
+variables:
+  known: ok
+
+steps:
+  - id: first
+    action: playwright.navigate
+    args:
+      url: "{{ steps.nope.url }}"
+    timeout_sec: 10
+
+  - id: second
+    action: playwright.wait_for
+    args:
+      text: "{{ vars.undefined }}"
+    timeout_sec: 10
+
+  - id: third
+    action: playwright.snapshot
+    args:
+      filename: "{{ foo.bar }}"
+    timeout_sec: 10

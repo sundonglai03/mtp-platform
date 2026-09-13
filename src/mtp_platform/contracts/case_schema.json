@@ -1,0 +1,386 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://my-test.local/schemas/case.schema.json",
+  "title": "my-test 测试用例",
+  "description": "统一的 YAML/JSON 测试用例格式。schema_version 用于后续演进。",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "id",
+    "title",
+    "steps"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "description": "格式版本。新增字段时递增，校验器按版本选择规则。",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1
+    },
+    "id": {
+      "description": "全局唯一用例 ID",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{2,63}$"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "description": {
+      "type": "string"
+    },
+    "module": {
+      "type": "string",
+      "minLength": 1
+    },
+    "priority": {
+      "enum": [
+        "P0",
+        "P1",
+        "P2",
+        "P3"
+      ]
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "environment": {
+      "$ref": "#/$defs/environment"
+    },
+    "secrets": {
+      "description": "{逻辑名: 环境变量名}。禁止在此写明文凭据。",
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[A-Z_][A-Z0-9_]*$"
+      }
+    },
+    "variables": {
+      "description": "用例内变量，可在任意字符串里用 {{ vars.xxx }} 引用",
+      "type": "object"
+    },
+    "timeout_sec": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "retry": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 5
+    },
+    "on_failure": {
+      "$ref": "#/$defs/on_failure"
+    },
+    "fixtures": {
+      "description": "测试数据准备。执行于前置条件之前，清理于后置条件之后（必定执行）",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/fixture"
+      }
+    },
+    "preconditions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/step"
+      }
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/step"
+      }
+    },
+    "assertions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/assertion"
+      }
+    },
+    "postconditions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/step"
+      }
+    }
+  },
+  "$defs": {
+    "on_failure": {
+      "description": "步骤失败后的策略",
+      "enum": [
+        "abort",
+        "continue"
+      ]
+    },
+    "environment": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "base_url": {
+          "type": "string"
+        },
+        "db": {
+          "type": "object",
+          "required": [
+            "host",
+            "database"
+          ],
+          "additionalProperties": true,
+          "properties": {
+            "host": {
+              "type": "string"
+            },
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "user": {
+              "type": "string"
+            },
+            "database": {
+              "type": "string"
+            },
+            "password": {
+              "description": "只允许 {{ secrets.xxx }} 形式；校验器会拒绝明文",
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "step": {
+      "type": "object",
+      "required": [
+        "id",
+        "action"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
+        },
+        "action": {
+          "description": "<适配器>.<动作>，如 playwright.navigate / mysql.query / api.post / ssh.execute",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+        },
+        "description": {
+          "type": "string"
+        },
+        "args": {
+          "type": "object"
+        },
+        "timeout_sec": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "retry": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5
+        },
+        "retry_delay_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60000
+        },
+        "on_failure": {
+          "$ref": "#/$defs/on_failure"
+        },
+        "evidence": {
+          "description": "该步骤额外采集哪些证据",
+          "type": "array",
+          "items": {
+            "enum": [
+              "screenshot",
+              "snapshot",
+              "console",
+              "network",
+              "trace",
+              "text"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "continue_on_error": {
+          "type": "boolean"
+        },
+        "expect_failure": {
+          "description": "负向用例：该步骤本就应当失败（例如验证安全策略拦截）。失败→通过，成功→失败",
+          "type": "boolean"
+        }
+      }
+    },
+    "assertion": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "顶层断言必填；all/any 的子项可省略，由验证器自动编号",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
+        },
+        "type": {
+          "enum": [
+            "equals",
+            "contains",
+            "status_code",
+            "json_path",
+            "json_schema",
+            "response_time",
+            "page_text_contains",
+            "element_visible",
+            "file_exists",
+            "exit_code",
+            "db_value",
+            "all",
+            "any"
+          ]
+        },
+        "description": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "actual": {
+          "description": "被比较值，通常为 {{ ... }} 表达式",
+          "type": [
+            "string",
+            "number",
+            "boolean",
+            "null",
+            "object",
+            "array"
+          ]
+        },
+        "expected": {
+          "description": "期望值，可以是字面量或 {{ ... }} 表达式",
+          "type": [
+            "string",
+            "number",
+            "boolean",
+            "null",
+            "object",
+            "array"
+          ]
+        },
+        "source": {
+          "description": "提供上下文句柄的步骤，如 {{ steps.open-login }}（用于 element_visible 等需要现场状态的断言）",
+          "type": "string"
+        },
+        "args": {
+          "type": "object"
+        },
+        "items": {
+          "description": "type 为 all/any 时的子断言",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/assertion"
+          }
+        },
+        "severity": {
+          "enum": [
+            "blocker",
+            "critical",
+            "major",
+            "minor"
+          ]
+        }
+      }
+    },
+    "fixture": {
+      "description": "测试数据 fixture：准备 + 可选校验 + 必定执行的清理",
+      "type": "object",
+      "required": [
+        "id",
+        "action"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
+        },
+        "action": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+        },
+        "description": {
+          "type": "string"
+        },
+        "args": {
+          "type": "object"
+        },
+        "timeout_sec": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "retry": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5
+        },
+        "on_failure": {
+          "$ref": "#/$defs/on_failure"
+        },
+        "verify": {
+          "description": "准备完成后立即校验数据确实存在",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/assertion"
+          }
+        },
+        "cleanup": {
+          "description": "清理动作。省略则使用内置的按 run_id 反向清理策略",
+          "type": "object",
+          "required": [
+            "action"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+            },
+            "args": {
+              "type": "object"
+            },
+            "timeout_sec": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "required": {
+              "description": "清理失败是否算用例失败（默认 false，只告警）",
+              "type": "boolean"
+            }
+          }
+        },
+        "expect_failure": {
+          "description": "负向用例：该步骤本就应当失败（例如验证安全策略拦截）。失败→通过，成功→失败",
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}
