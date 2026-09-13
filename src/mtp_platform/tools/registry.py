@@ -12,13 +12,15 @@ from ..contracts.config import PlatformConfig
 from ..contracts.errors import ConfigError
 from .base import BaseTool
 from .http import ApiTool
+from .ssh import SshTool
 
 
 def _default_builders() -> dict[str, Callable[[PlatformConfig], BaseTool]]:
     """内置工具工厂。新增直连工具只需在这里挂一项。"""
     return {
         "api": ApiTool,
-        # 随后补：ssh / mysql / playwright / office
+        "ssh": SshTool,
+        # 随后补：mysql / playwright / office
     }
 
 

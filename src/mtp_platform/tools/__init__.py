@@ -7,5 +7,13 @@
 from mtp_platform.tools.base import ActionResult, BaseTool, StepContext
 from mtp_platform.tools.http import ApiTool
 from mtp_platform.tools.registry import ToolRegistry
+from mtp_platform.tools.ssh import SshTool
 
-__all__ = ["BaseTool", "ApiTool", "ToolRegistry", "ActionResult", "StepContext"]
+__all__ = [
+    "BaseTool",
+    "ApiTool",
+    "SshTool",
+    "ToolRegistry",
+    "ActionResult",
+    "StepContext",
+]

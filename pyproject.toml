@@ -16,8 +16,9 @@ dependencies = [
     "requests>=2.31",          # http 直连工具
 ]
 
-# 直连工具的重依赖随后按工具拆成独立 extra（如 paramiko / playwright / 数据库连接器）
+# 直连工具的重依赖按工具拆成独立 extra
 [project.optional-dependencies]
+ssh = ["paramiko>=3.4"]
 dev = ["pytest>=9.0"]
 
 [project.scripts]
