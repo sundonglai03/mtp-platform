@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mtp-platform"
+version = "0.1.0"
+description = "自动化测试系统：接收规范用例，直连工具执行并生成报告"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "mtp-contracts==0.1.0",
+    "PyYAML>=6.0",
+    "Jinja2>=3.1",
+    "jsonpath-ng>=1.6",
+]
+
+# 工具依赖：按需安装。direct tools 直连库（不走 MCP）。
+# 说明：具体依赖随各工具实现落地调整，此处为初版占位。
+[project.optional-dependencies]
+tools = [
+    "requests>=2.31",
+]
+dev = ["pytest>=9.0"]
+
+[project.scripts]
+mtp = "mtp_platform.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
