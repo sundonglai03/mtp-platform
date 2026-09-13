@@ -19,6 +19,7 @@ dependencies = [
 # 直连工具的重依赖按工具拆成独立 extra
 [project.optional-dependencies]
 ssh = ["paramiko>=3.4"]
+mysql = ["PyMySQL>=1.1"]
 dev = ["pytest>=9.0"]
 
 [project.scripts]
