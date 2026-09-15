@@ -15,6 +15,7 @@ import argparse
 import re
 import sys
 from pathlib import Path
+from typing import Any
 
 from mtp_platform.audit import AuditLog
 from mtp_platform.config import load_config
@@ -95,6 +96,45 @@ def cmd_validate(args: argparse.Namespace) -> int:
                 print(f"         - {message}")
     print(f"\n共 {len(cases)} 个用例，{len(cases) - bad} 通过校验，{bad} 个不合法")
     return 1 if bad else 0
+
+
+# ---------------------------------------------------------------------------
+# doctor
+# ---------------------------------------------------------------------------
+def cmd_doctor(args: argparse.Namespace) -> int:
+    """体检：配置解析、路径问题、各直连工具是否可用。"""
+    config = load_config(args.config)
+    print(f"配置文件: {config.path}")
+    print(f"项目根  : {config.base_dir}")
+    print(f"证据目录: {config.artifact_root()}")
+    print(f"报告目录: {config.report_dir()}")
+    print(f"历史文件: {config.history_file()}")
+
+    print("\n配置路径检查:")
+    problems = config.path_problems()
+    if problems:
+        for problem in problems:
+            print(f"  - {problem}")
+    else:
+        print("  - 全部通过")
+
+    registry = ToolRegistry(config)
+    health: dict[str, Any] = {}
+    try:
+        print("\n直连工具可用性:")
+        health = registry.health()
+        for name, status in sorted(health.items()):
+            if status is True:
+                print(f"  - {name:<11} OK")
+            elif status is False:
+                print(f"  - {name:<11} FAIL  不可用（通常是没有装可选依赖，见 README 的 extras）")
+            else:
+                print(f"  - {name:<11} FAIL  {status}")
+    finally:
+        registry.close_all()
+
+    unhealthy = [name for name, status in health.items() if status is not True]
+    return 1 if problems or unhealthy else 0
 
 
 # ---------------------------------------------------------------------------
@@ -249,6 +289,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_validate = _add_config(sub.add_parser("validate", help="校验用例（内联 contracts-core）"))
     p_validate.add_argument("targets", nargs="+")
 
+    _add_config(sub.add_parser("doctor", help="体检：配置路径 + 直连工具可用性"))
+
     p_run = _add_config(sub.add_parser("run", help="执行用例并生成报告"))
     p_run.add_argument("targets", nargs="+")
     p_run.add_argument(
@@ -272,6 +314,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     handlers = {
         "validate": cmd_validate,
+        "doctor": cmd_doctor,
         "run": cmd_run,
         "trend": cmd_trend,
         "version": cmd_version,

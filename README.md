@@ -48,6 +48,7 @@ contracts-core 在本项目内是一份**内联副本**（`src/mtp_platform/cont
 uv sync --extra dev          # 建 .venv 并安装（含 dev 依赖）
 uv run pytest -q             # 跑测试
 uv run mtp version
+uv run mtp doctor            # 体检：配置路径 + 各直连工具是否可用
 uv run mtp validate tests/cases/valid
 uv run mtp run tests/cases/valid --out artifacts/reports
 ```
@@ -81,10 +82,21 @@ MySQL 写操作需 `--allow-write` 且事务内核对影响行数、超限回滚
 
 ## 容器部署（独立 compose）
 
+镜像默认用 `uv sync --all-extras`（api / ssh / mysql / playwright / office 全都在，
+否则容器里这些工具会在运行时才报「依赖缺失」），并安装 Chromium。
+
 ```bash
-docker compose build
+docker compose build                              # 含浏览器内核
+docker compose run --rm mtp-platform doctor
 docker compose run --rm mtp-platform validate /app/cases/valid
+docker compose run --rm mtp-platform run /app/cases --office
 ```
 
-产物默认落在 `artifacts/`（`MTP_ARTIFACT_ROOT` 可改）。两个系统**各自独立**部署，
-不共用 compose。
+不要浏览器内核可以显著瘦身：
+
+```bash
+docker build --build-arg MTP_INSTALL_BROWSER=0 -t mtp-platform:0.1.0 .
+```
+
+产物默认落在 `artifacts/`（`MTP_ARTIFACT_ROOT` 可改），compose 已把它挂成卷。
+两个系统**各自独立**部署，不共用 compose。
