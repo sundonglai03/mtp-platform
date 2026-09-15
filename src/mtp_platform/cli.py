@@ -28,6 +28,7 @@ from mtp_platform.reporting import (
     write_html,
     write_json,
     write_junit,
+    write_office_reports,
 )
 from mtp_platform.tools.registry import ToolRegistry
 
@@ -171,6 +172,13 @@ def cmd_run(args: argparse.Namespace) -> int:
     junit_path = write_junit(results, out_dir, run_id=run_id, filename=f"{run_id}-junit.xml")
     html_path = write_html(payload, out_dir, filename=f"{run_id}-report.html")
 
+    # Office 是附加产物：缺依赖或生成失败只告警，不改变这次 run 的结论
+    office: dict = {"xlsx": None, "docx": None, "errors": []}
+    if args.office:
+        office = write_office_reports(payload, out_dir, filename_prefix=f"{run_id}-report")
+        for item in office["errors"]:
+            print(f"⚠  {item['kind']} 报告生成失败: {item['error']}", file=sys.stderr)
+
     # 「最新」指针：方便 CI 固定路径收集
     latest = out_dir / "latest"
     latest.mkdir(parents=True, exist_ok=True)
@@ -178,8 +186,11 @@ def cmd_run(args: argparse.Namespace) -> int:
         (payload["_written_to"], "results.json"),
         (junit_path, "junit.xml"),
         (html_path, "report.html"),
+        (office["xlsx"], "report.xlsx"),
+        (office["docx"], "report.docx"),
     ):
-        (latest / name).write_bytes(Path(src).read_bytes())
+        if src:
+            (latest / name).write_bytes(Path(src).read_bytes())
 
     append_history(payload, config.history_file())
     audit.run_end(
@@ -194,6 +205,12 @@ def cmd_run(args: argparse.Namespace) -> int:
     print(f"JSON : {payload['_written_to']}")
     print(f"JUnit: {junit_path}")
     print(f"HTML : {html_path}")
+    if office["xlsx"]:
+        print(f"Excel: {office['xlsx']}")
+    if office["docx"]:
+        print(f"Word : {office['docx']}")
+    if args.office and not (office["xlsx"] and office["docx"]):
+        print("（Office 报告不完整，见上面的告警）")
 
     return 0 if payload["summary"]["success"] else 1
 
@@ -240,6 +257,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--tag", help="只跑带该标签的用例")
     p_run.add_argument("--out", help="报告输出目录（默认 config.report_dir()）")
     p_run.add_argument("--run-id", help="指定 run_id（默认自动生成）")
+    p_run.add_argument(
+        "--office", action="store_true", help="额外生成 Excel / Word 报告（需 office extra）"
+    )
 
     p_trend = _add_config(sub.add_parser("trend", help="历史趋势"))
     p_trend.add_argument("--limit", type=int, default=10)

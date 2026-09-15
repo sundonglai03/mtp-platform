@@ -21,6 +21,7 @@ dependencies = [
 ssh = ["paramiko>=3.4"]
 mysql = ["PyMySQL>=1.1"]
 playwright = ["playwright>=1.40"]
+office = ["openpyxl>=3.1", "python-docx>=1.1"]
 dev = ["pytest>=9.0"]
 
 [project.scripts]
