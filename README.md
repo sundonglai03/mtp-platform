@@ -49,7 +49,35 @@ uv sync --extra dev          # 建 .venv 并安装（含 dev 依赖）
 uv run pytest -q             # 跑测试
 uv run mtp version
 uv run mtp validate tests/cases/valid
+uv run mtp run tests/cases/valid --out artifacts/reports
 ```
+
+## 直连工具与可选依赖
+
+工具位于 `src/mtp_platform/tools/`（**执行链路不走 MCP**）。核心只依赖 `requests`；
+其余按需装：
+
+| extra | 工具 | 说明 |
+|---|---|---|
+| （内置） | `api` | HTTP/接口（requests） |
+| `ssh` | `ssh` | paramiko：execute / upload / download |
+| `mysql` | `mysql` | PyMySQL：query / fetch / count / insert / update / delete |
+| `playwright` | `playwright` | 浏览器：navigate / click / type / snapshot / screenshot / evaluate … |
+
+```bash
+uv sync --extra ssh --extra mysql --extra playwright
+playwright install chromium     # 浏览器内核（约 130MB）
+```
+
+想让多个项目共用一份浏览器内核（例如复用本机已有的 playwright 安装）：
+
+```bash
+export PLAYWRIGHT_BROWSERS_PATH=/path/to/shared/browsers
+```
+
+安全口径：SSH/MySQL 走白名单（`security.ssh_allow_hosts` / `mysql_allow_hosts`），
+MySQL 写操作需 `--allow-write` 且事务内核对影响行数、超限回滚；playwright 的
+`evaluate` 需用例显式 `allow_js: true`。
 
 ## 容器部署（独立 compose）
 

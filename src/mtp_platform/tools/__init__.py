@@ -7,6 +7,7 @@
 from mtp_platform.tools.base import ActionResult, BaseTool, StepContext
 from mtp_platform.tools.http import ApiTool
 from mtp_platform.tools.mysql import MysqlTool
+from mtp_platform.tools.playwright import PlaywrightTool
 from mtp_platform.tools.registry import ToolRegistry
 from mtp_platform.tools.ssh import SshTool
 
@@ -15,6 +16,7 @@ __all__ = [
     "ApiTool",
     "SshTool",
     "MysqlTool",
+    "PlaywrightTool",
     "ToolRegistry",
     "ActionResult",
     "StepContext",

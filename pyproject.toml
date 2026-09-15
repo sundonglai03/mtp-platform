@@ -20,6 +20,7 @@ dependencies = [
 [project.optional-dependencies]
 ssh = ["paramiko>=3.4"]
 mysql = ["PyMySQL>=1.1"]
+playwright = ["playwright>=1.40"]
 dev = ["pytest>=9.0"]
 
 [project.scripts]

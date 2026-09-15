@@ -13,6 +13,7 @@ from ..contracts.errors import ConfigError
 from .base import BaseTool
 from .http import ApiTool
 from .mysql import MysqlTool
+from .playwright import PlaywrightTool
 from .ssh import SshTool
 
 
@@ -22,7 +23,8 @@ def _default_builders() -> dict[str, Callable[[PlatformConfig], BaseTool]]:
         "api": ApiTool,
         "ssh": SshTool,
         "mysql": MysqlTool,
-        # 随后补：playwright / office
+        "playwright": PlaywrightTool,
+        # 随后补：office
     }
 
 
