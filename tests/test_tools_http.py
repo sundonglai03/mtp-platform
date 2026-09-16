@@ -158,6 +158,17 @@ def test_api_download_output_must_stay_inside_download_root(config):
     assert _resolve_within(inside, [root], reason="下载输出") == inside.resolve()
 
 
+def test_api_download_root_follows_artifact_override(monkeypatch, tmp_path):
+    """默认下载目录必须跟随 MTP_ARTIFACT_ROOT，避免容器里写回源码目录。"""
+    from mtp_platform.config import load_config
+
+    target = tmp_path / "external-artifacts"
+    monkeypatch.setenv("MTP_ARTIFACT_ROOT", str(target))
+    config = load_config()
+
+    assert config.api_download_root() == target
+
+
 def test_resolve_within_returns_none_style_error_for_broken_roots():
     """允许目录列表为空时，任何路径都必须被拒。"""
     from mtp_platform.tools.http import _resolve_within
@@ -363,5 +374,4 @@ def test_api_response_within_limit_is_returned(monkeypatch):
     assert result.ok, result.error
     assert result.data["json"] == {"n": 1}
     assert result.data["text"] == '{"n": 1}'
-
 

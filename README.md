@@ -1,102 +1,130 @@
 # mtp-platform
 
-**自动化测试系统**：接收已经规范化的测试用例，**直连工具**执行并生成报告。
+读取规范测试用例，直接调用 SSH、MySQL、Playwright 和 HTTP 工具，最后生成证据与测试报告。
 
-## 职责
+它是 CLI / Docker 批任务执行器，不依赖 MCP 协议，也不是常驻 HTTP 服务。
 
-- 接收规范用例（由 Agent 经 `mtp-contracts-mcp` 校验、规范化后的 YAML/JSON）；
-- 用内联的 **contracts-core** 校验输入；
-- `engine` 负责编排、重试、超时与状态管理；
-- `tools` **直接调用** SSH / MySQL / Playwright / HTTP / Office 能力（**执行链路不走 MCP**）；
-- 收集截图、日志、Trace 与接口响应；
-- 生成 JSON / JUnit / HTML / Excel / Word 报告；
-- 提供 CLI / HTTP API；
-- 作为独立 Linux / Docker 服务部署。
+## 快速开始
 
-## 组成
-
-```
-mtp-platform
-├── contracts/        contracts-core 内联副本（自动生成，勿手改）
-├── engine/           编排 / 断言 / 证据 / 台账        （待实现）
-├── tools/            直连工具：ssh / mysql / playwright / http / office（待实现）
-├── reporting/        JSON / JUnit / HTML / Excel / Word（待实现）
-└── cli.py            命令行入口 `mtp`
-```
-
-## 为什么执行链路不用 MCP
-
-直接调用工具，减少 MCP client/server 进程管理、Streamable HTTP 网络层、额外序列化、
-子进程清理与超时/连接故障，也减少部署组件。**MCP 只作为外部复用接口保留**
-（见 `mtp-contracts-mcp`），不作为执行平台的核心依赖。
-
-## contracts-core 内联（必读）
-
-contracts-core 在本项目内是一份**内联副本**（`src/mtp_platform/contracts/`），与
-`mtp-contracts-mcp` 里的那份**逐字节一致**（副本内部全部使用相对导入，不含包名）。
-
-- **要改 contracts**：改本项目里的 `src/mtp_platform/contracts/`（这是唯一事实来源），
-  然后运行同步脚本推到另一个项目：
-  ```bash
-  uv run python scripts/sync_contracts.py
-  ```
-- 副本带 `_sync_manifest.json`；`tests/test_contracts_integrity.py` 会在副本被手改或忘记同步时失败。
-
-## 本地开发（uv）
+### 本地运行
 
 ```bash
-uv sync --extra dev          # 建 .venv 并安装（含 dev 依赖）
-uv run pytest -q             # 跑测试
-uv run mtp version
-uv run mtp doctor            # 体检：配置路径 + 各直连工具是否可用
-uv run mtp validate tests/cases/valid
-uv run mtp run tests/cases/valid --out artifacts/reports
+uv sync --frozen --all-extras --extra dev
+uv run --frozen mtp doctor
+uv run --frozen mtp validate tests/cases/valid
+uv run --frozen mtp run tests/cases/valid --out artifacts/reports
 ```
 
-## 直连工具与可选依赖
-
-工具位于 `src/mtp_platform/tools/`（**执行链路不走 MCP**）。核心只依赖 `requests`；
-其余按需装：
-
-| extra | 工具 | 说明 |
-|---|---|---|
-| （内置） | `api` | HTTP/接口（requests） |
-| `ssh` | `ssh` | paramiko：execute / upload / download |
-| `mysql` | `mysql` | PyMySQL：query / fetch / count / insert / update / delete |
-| `playwright` | `playwright` | 浏览器：navigate / click / type / snapshot / screenshot / evaluate … |
+### Docker
 
 ```bash
-uv sync --extra ssh --extra mysql --extra playwright
-playwright install chromium     # 浏览器内核（约 130MB）
-```
-
-想让多个项目共用一份浏览器内核（例如复用本机已有的 playwright 安装）：
-
-```bash
-export PLAYWRIGHT_BROWSERS_PATH=/path/to/shared/browsers
-```
-
-安全口径：SSH/MySQL 走白名单（`security.ssh_allow_hosts` / `mysql_allow_hosts`），
-MySQL 写操作需 `--allow-write` 且事务内核对影响行数、超限回滚；playwright 的
-`evaluate` 需用例显式 `allow_js: true`。
-
-## 容器部署（独立 compose）
-
-镜像默认用 `uv sync --all-extras`（api / ssh / mysql / playwright / office 全都在，
-否则容器里这些工具会在运行时才报「依赖缺失」），并安装 Chromium。
-
-```bash
-docker compose build                              # 含浏览器内核
+docker compose build
 docker compose run --rm mtp-platform doctor
 docker compose run --rm mtp-platform validate /app/cases/valid
 docker compose run --rm mtp-platform run /app/cases --office
 ```
 
-不要浏览器内核可以显著瘦身：
+任务完成后容器退出，报告保留在宿主机的 `artifacts/`。镜像名为 `mtp-platform:0.1.0`，容器名为 `mtp-platform`。
+
+## 工作流程
+
+```text
+Agent + mtp-contracts-mcp
+          ↓
+      规范 YAML / JSON
+          ↓
+      mtp-platform
+          ├─ engine：编排、超时、重试、断言
+          ├─ tools：直接调用被测系统
+          └─ reporting：汇总证据和结果
+          ↓
+JSON / JUnit / HTML / Excel / Word 报告
+```
+
+## 常用命令
+
+| 命令 | 作用 |
+| --- | --- |
+| `mtp version` | 显示版本 |
+| `mtp doctor` | 检查配置路径和工具依赖 |
+| `mtp validate <路径>` | 校验一个用例或用例目录 |
+| `mtp run <路径>` | 执行用例并生成报告 |
+
+完整参数使用 `mtp --help` 或 `mtp <子命令> --help` 查看。
+
+## 项目结构
+
+```text
+src/mtp_platform/
+├── contracts/   # 契约副本，自动同步，勿直接修改
+├── engine/      # 编排、断言、证据和执行历史
+├── tools/       # SSH、MySQL、Playwright、HTTP 直连工具
+├── reporting/   # JSON、JUnit、HTML、Excel、Word 报告
+└── cli.py       # `mtp` 命令入口
+```
+
+工具直接作为 Python 模块调用。这样可以减少 MCP 服务进程、网络调用、序列化和连接管理；MCP 只用于让外部 Agent 复用测试用例契约。
+
+## 工具依赖
+
+| extra | 能力 | 依赖 |
+| --- | --- | --- |
+| 无 | HTTP API | `requests`，默认安装 |
+| `ssh` | 命令、上传、下载 | Paramiko |
+| `mysql` | 查询和受控写入 | PyMySQL |
+| `playwright` | 浏览器自动化 | Playwright + Chromium |
+| `office` | Excel / Word 报告 | openpyxl、python-docx |
+
+按需安装示例：
+
+```bash
+uv sync --frozen --extra ssh --extra mysql --extra playwright
+uv run playwright install chromium
+```
+
+Docker 镜像默认包含全部 extra 和 Chromium。不需要浏览器时可以减小镜像：
 
 ```bash
 docker build --build-arg MTP_INSTALL_BROWSER=0 -t mtp-platform:0.1.0 .
 ```
 
-产物默认落在 `artifacts/`（`MTP_ARTIFACT_ROOT` 可改），compose 已把它挂成卷。
-两个系统**各自独立**部署，不共用 compose。
+## 配置与安全
+
+主配置文件是 `mtp_config.yaml`。常用环境变量：
+
+| 变量 | 作用 |
+| --- | --- |
+| `MTP_ROOT` | 项目和相对路径的解析根目录 |
+| `MTP_ARTIFACT_ROOT` | 证据、下载文件、报告和历史记录目录 |
+| `PLAYWRIGHT_BROWSERS_PATH` | 共享 Playwright 浏览器内核目录 |
+
+默认安全策略包括：
+
+- SSH、MySQL 使用目标白名单；
+- MySQL 写操作需要 `--allow-write`，并限制最大影响行数；
+- HTTP 阻止云元数据等危险地址，并限制响应大小和重定向次数；
+- Playwright 执行 JavaScript 需要用例明确设置 `allow_js: true`；
+- 密码、Token、Cookie 等字段写入报告前会脱敏。
+
+仓库配置不得写入真实凭据。账号密码由运行环境或单次测试用例注入。
+
+## contracts 同步
+
+`src/mtp_platform/contracts/` 是执行时使用的契约副本，唯一源码位于相邻的 `mtp-contracts-mcp`。修改契约后执行：
+
+```bash
+uv run --frozen python scripts/sync_contracts.py
+```
+
+完整性测试会检查副本是否被手工改动或忘记同步。
+
+## 当前部署边界
+
+当前每次 `mtp run` 对应一个测试任务。若以后需要网页或 Agent 通过 HTTP 提交任务，应在本项目外层增加 API、任务队列和执行 Worker；不要把任务执行能力放进 `mtp-contracts-mcp`。
+
+## 验证
+
+```bash
+uv run --frozen --extra dev pytest -q
+docker compose config
+```

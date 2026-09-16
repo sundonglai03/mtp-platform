@@ -29,6 +29,9 @@ security:
   mysql_allow_hosts:
     - "127.0.0.1"
     - "localhost"
+    - "192.168.*"
+    - "10.*"
+    - "172.16.*"
   # 禁止连接的库名（生产库兜底防线）
   mysql_deny_databases:
     - gkpt
@@ -45,8 +48,8 @@ security:
     - "fixtures"
     - "artifacts"
     - "cases"
-  # api download 的落盘根目录；缺省 = 证据目录（artifacts）
-  api_download_root: "artifacts"
+  # api download 的落盘根目录；缺省跟随 evidence.root / MTP_ARTIFACT_ROOT。
+  # 只有确需分离下载目录时才显式配置 api_download_root。
   # api 允许访问的目标主机（fnmatch 通配，只比主机名不含端口）。
   # 不配（注释掉）= 只挡云元数据/链路本地这类地址，内网被测服务照常可连；
   # 配了 = 白名单模式，不在列表内一律拒绝；配成 [] = 全部拒绝。

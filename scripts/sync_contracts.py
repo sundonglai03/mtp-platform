@@ -1,7 +1,7 @@
 """把 contracts-core 内联副本同步到两个系统项目。
 
-- **唯一事实来源**：`mtp-platform` 内的 `mtp_platform/contracts/`（要改 contracts 就改这里）。
-- 本脚本把它逐字节复制到 `mtp-contracts-mcp` 的 `mtp_contracts_mcp/contracts/`，
+- **唯一事实来源**：`mtp-contracts-mcp` 内的 `mtp_contracts_mcp/contracts/`。
+- 本脚本把它逐字节复制到 `mtp-platform` 的 `mtp_platform/contracts/`，
   并重新生成两侧的 `_sync_manifest.json`。
 
 为什么能逐字节一致：副本内部全部使用**相对导入**（`from .errors import ...`），
@@ -19,8 +19,8 @@ from pathlib import Path
 
 STUDY = Path(__file__).resolve().parents[2]
 
-MASTER = STUDY / "mtp-platform" / "src" / "mtp_platform" / "contracts"
-SLAVE = STUDY / "mtp-contracts-mcp" / "src" / "mtp_contracts_mcp" / "contracts"
+MASTER = STUDY / "mtp-contracts-mcp" / "src" / "mtp_contracts_mcp" / "contracts"
+SLAVE = STUDY / "mtp-platform" / "src" / "mtp_platform" / "contracts"
 
 MANIFEST = "_sync_manifest.json"
 
