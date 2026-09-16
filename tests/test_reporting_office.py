@@ -9,7 +9,7 @@ import openpyxl
 import pytest
 from docx import Document
 
-from mtp_platform.contracts.results import CaseResult, RunState, StepResult, StepStatus
+from mtp_contracts.results import CaseResult, RunState, StepResult, StepStatus
 from mtp_platform.reporting import build_payload
 from mtp_platform.reporting.office_reporter import first_failure, write_office_reports
 

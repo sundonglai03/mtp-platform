@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from mtp_platform.contracts.config import PlatformConfig
-from mtp_platform.contracts.errors import ConfigError
+from mtp_contracts.config import PlatformConfig
+from mtp_contracts.errors import ConfigError
 
 
 class FakeRegistry:

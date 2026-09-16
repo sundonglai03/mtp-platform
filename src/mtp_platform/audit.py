@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .contracts.redaction import DEFAULT_PLACEHOLDER, DEFAULT_REDACT_KEYS, redact
+from mtp_contracts.redaction import DEFAULT_PLACEHOLDER, DEFAULT_REDACT_KEYS, redact
 
 EVENT_RUN_START = "run.start"
 EVENT_RUN_END = "run.end"

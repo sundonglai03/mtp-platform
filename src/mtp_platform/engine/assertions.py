@@ -21,8 +21,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from ..contracts.redaction import DEFAULT_PLACEHOLDER, DEFAULT_REDACT_KEYS, SecretRegistry, redact
-from ..contracts.variables import resolve
+from mtp_contracts.redaction import DEFAULT_PLACEHOLDER, DEFAULT_REDACT_KEYS, SecretRegistry, redact
+from mtp_contracts.variables import resolve
 
 # probe(action, args) -> {"ok": bool, "data": dict, "error": dict|None}
 Probe = Callable[[str, dict], dict]

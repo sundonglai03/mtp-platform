@@ -28,8 +28,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ..contracts.errors import ConfigError, StateCorruptError
-from ..contracts.config import PlatformConfig
+from mtp_contracts.errors import ConfigError, StateCorruptError
+from mtp_contracts.config import PlatformConfig
 
 LEDGER_DIRNAME = "_ledger"
 
@@ -248,7 +248,7 @@ class DataManager:
 
         需要 `allow_write=True`：清理也是写操作，不能绕过同意机制。
         """
-        from ..contracts.adapters import StepContext
+        from mtp_contracts.adapters import StepContext
 
         ledger = self.ledger(run_id)
         entries = ledger.entries()

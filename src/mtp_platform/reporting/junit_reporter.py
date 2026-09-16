@@ -16,7 +16,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
-from ..contracts.results import CaseResult, RunState
+from mtp_contracts.results import CaseResult, RunState
 
 _STATUS_TO_TAG = {
     RunState.FAILED: "failure",

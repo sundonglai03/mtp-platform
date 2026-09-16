@@ -9,8 +9,8 @@ description = "自动化测试系统：接收规范用例，直连工具执行�
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "mtp-contracts-core==0.1.0",
     "PyYAML>=6.0",
-    "jsonschema>=4.20",
     "Jinja2>=3.1",
     "jsonpath-ng>=1.6",
     "requests>=2.31",          # http 直连工具
@@ -27,11 +27,11 @@ dev = ["pytest>=9.0"]
 [project.scripts]
 mtp = "mtp_platform.cli:main"
 
+[tool.uv.sources]
+mtp-contracts-core = { git = "https://github.com/sundonglai03/mtp-contracts-core.git", tag = "v0.1.0" }
+
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.setuptools.package-data]
-"mtp_platform.contracts" = ["case_schema.json", "_sync_manifest.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

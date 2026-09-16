@@ -1,7 +1,7 @@
 """配置加载（platform 侧）。
 
 只负责**文件定位、读取、环境变量展开**；配置的**数据模型**在
-`mtp_platform.contracts.config`（`PlatformConfig` / `McpServerConfig`）。
+`mtp_contracts.config`（`PlatformConfig` / `McpServerConfig`）。
 
 "项目根"默认取当前工作目录（可用 `MTP_ROOT` 覆盖），所有相对路径按它解析 ——
 这样安装成包之后也能正常工作，不依赖源码目录。
@@ -23,8 +23,8 @@ from typing import Any
 
 import yaml
 
-from mtp_platform.contracts.config import PlatformConfig
-from mtp_platform.contracts.errors import ConfigError
+from mtp_contracts.config import PlatformConfig
+from mtp_contracts.errors import ConfigError
 
 # ${VAR} 与 ${VAR:-默认值}
 _ENV_REF = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")

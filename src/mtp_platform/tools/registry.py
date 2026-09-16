@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from ..contracts.config import PlatformConfig
-from ..contracts.errors import ConfigError
+from mtp_contracts.config import PlatformConfig
+from mtp_contracts.errors import ConfigError
 from .base import BaseTool
 from .http import ApiTool
 from .mysql import MysqlTool

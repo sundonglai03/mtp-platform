@@ -1,7 +1,7 @@
 """mtp 命令行入口（自动化测试系统）。
 
 命令：
-- `validate`  用内联 contracts-core 校验用例；
+- `validate`  用独立的 contracts-core 包校验用例；
 - `run`       注入 ToolRegistry（直连工具）真跑用例，并产出 JSON / JUnit / HTML 报告；
 - `trend`     读取 history.jsonl 看趋势；
 - `version`   打印版本。
@@ -19,8 +19,8 @@ from typing import Any
 
 from mtp_platform.audit import AuditLog
 from mtp_platform.config import load_config
-from mtp_platform.contracts.case_validator import load_case, validate_file
-from mtp_platform.contracts.results import new_run_id, now_iso
+from mtp_contracts.case_validator import load_case, validate_file
+from mtp_contracts.results import new_run_id, now_iso
 from mtp_platform.engine import TestRunner
 from mtp_platform.reporting import (
     append as append_history,
@@ -286,7 +286,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="mtp", description="自动化测试系统（mtp-platform）")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_validate = _add_config(sub.add_parser("validate", help="校验用例（内联 contracts-core）"))
+    p_validate = _add_config(sub.add_parser("validate", help="校验用例（contracts-core）"))
     p_validate.add_argument("targets", nargs="+")
 
     _add_config(sub.add_parser("doctor", help="体检：配置路径 + 直连工具可用性"))

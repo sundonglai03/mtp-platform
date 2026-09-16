@@ -1,6 +1,6 @@
 """执行引擎：编排、断言、证据、数据台账。
 
-只依赖内联的 `mtp_platform.contracts`（契约）与 `ports.ToolRegistry`（端口）。
+只依赖独立的 `mtp_contracts`（契约）与 `ports.ToolRegistry`（端口）。
 具体工具实现由 platform 适配层注入，engine 不感知。
 """
 

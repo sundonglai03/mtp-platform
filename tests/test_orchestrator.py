@@ -10,11 +10,11 @@ from pathlib import Path
 
 import pytest
 
-from mtp_platform.contracts.adapters import ActionResult, StepContext
-from mtp_platform.contracts.errors import PolicyDeniedError, TimeoutError_
+from mtp_contracts.adapters import ActionResult, StepContext
+from mtp_contracts.errors import PolicyDeniedError, TimeoutError_
 from mtp_platform.config import load_config
 from fakes import FakeRegistry
-from mtp_platform.contracts.results import RunState, StepStatus
+from mtp_contracts.results import RunState, StepStatus
 
 ARTIFACTS = Path(__file__).resolve().parent.parent / "artifacts" / "_pytest"
 
@@ -115,7 +115,7 @@ def case_with(**overrides) -> dict:
 
 
 def run(config, adapters, case, **kw):
-    from mtp_platform.contracts.case_validator import require_valid
+    from mtp_contracts.case_validator import require_valid
 
     require_valid(case)
     runner = make_runner(config, adapters, **kw)
@@ -123,7 +123,7 @@ def run(config, adapters, case, **kw):
         from mtp_platform.engine.evidence import EvidenceStore
         import threading
 
-        from mtp_platform.contracts.results import new_run_id
+        from mtp_contracts.results import new_run_id
 
         run_id = new_run_id()
         store = EvidenceStore(ARTIFACTS, run_id, redact_keys=config.redact_keys())
@@ -318,10 +318,10 @@ def test_fixture_audit_warns_when_no_run_scoping(config):
 def test_cancel_between_steps(config):
     import threading
 
-    from mtp_platform.contracts.case_validator import require_valid
+    from mtp_contracts.case_validator import require_valid
     from mtp_platform.engine.evidence import EvidenceStore
     from mtp_platform.engine.orchestrator import TestRunner
-    from mtp_platform.contracts.results import new_run_id
+    from mtp_contracts.results import new_run_id
 
     adapter = RecordingAdapter()
     registry = FakeRegistry(config)

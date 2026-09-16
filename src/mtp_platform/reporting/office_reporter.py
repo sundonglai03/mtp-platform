@@ -35,7 +35,7 @@ def _require(module: str):
     try:
         return __import__(module)
     except ImportError as exc:  # pragma: no cover - 依赖缺失路径
-        from ..contracts.errors import ConfigError
+        from mtp_contracts.errors import ConfigError
 
         raise ConfigError(
             f"未安装 {module}，无法生成 Office 报告",

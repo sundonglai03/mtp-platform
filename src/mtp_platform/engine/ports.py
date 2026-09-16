@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
-from ..contracts.adapters import Adapter
+from mtp_contracts.adapters import Adapter
 
 
 @runtime_checkable

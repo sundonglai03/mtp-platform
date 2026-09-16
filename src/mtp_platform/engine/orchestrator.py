@@ -25,10 +25,10 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeou
 from pathlib import Path
 from typing import Any, Callable
 
-from ..contracts.adapters import ActionResult, StepContext
+from mtp_contracts.adapters import ActionResult, StepContext
 from .assertions import AssertionEngine, AssertionResult
-from ..contracts.case_validator import load_case, require_valid
-from ..contracts.errors import (
+from mtp_contracts.case_validator import load_case, require_valid
+from mtp_contracts.errors import (
     CancelledError_,
     ConfigError,
     MtpError,
@@ -36,11 +36,11 @@ from ..contracts.errors import (
     classify_exception,
 )
 from .evidence import EvidenceStore
-from ..contracts.config import PlatformConfig
-from ..contracts.redaction import SecretRegistry
+from mtp_contracts.config import PlatformConfig
+from mtp_contracts.redaction import SecretRegistry
 from .ports import ToolRegistry
-from ..contracts.results import CaseResult, RunState, StepResult, StepStatus, new_run_id, now_iso
-from ..contracts.variables import LazySecrets, resolve
+from mtp_contracts.results import CaseResult, RunState, StepResult, StepStatus, new_run_id, now_iso
+from mtp_contracts.variables import LazySecrets, resolve
 
 # 主流程阶段。注意 **postconditions 不在这里** ——
 # 它由 `_run_cleanup` 在 finally 里执行，保证成功/失败/取消/异常四种情况都跑到，

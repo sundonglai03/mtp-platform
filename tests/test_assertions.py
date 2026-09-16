@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 
 from mtp_platform.engine.assertions import AssertionEngine
-from mtp_platform.contracts.redaction import SecretRegistry
+from mtp_contracts.redaction import SecretRegistry
 
 
 @pytest.fixture()

@@ -9,7 +9,7 @@
 ### 本地运行
 
 ```bash
-uv sync --frozen --all-extras --extra dev
+uv sync --frozen --all-extras
 uv run --frozen mtp doctor
 uv run --frozen mtp validate tests/cases/valid
 uv run --frozen mtp run tests/cases/valid --out artifacts/reports
@@ -56,7 +56,6 @@ JSON / JUnit / HTML / Excel / Word 报告
 
 ```text
 src/mtp_platform/
-├── contracts/   # 契约副本，自动同步，勿直接修改
 ├── engine/      # 编排、断言、证据和执行历史
 ├── tools/       # SSH、MySQL、Playwright、HTTP 直连工具
 ├── reporting/   # JSON、JUnit、HTML、Excel、Word 报告
@@ -108,15 +107,11 @@ docker build --build-arg MTP_INSTALL_BROWSER=0 -t mtp-platform:0.1.0 .
 
 仓库配置不得写入真实凭据。账号密码由运行环境或单次测试用例注入。
 
-## contracts 同步
+## contracts 依赖
 
-`src/mtp_platform/contracts/` 是执行时使用的契约副本，唯一源码位于相邻的 `mtp-contracts-mcp`。修改契约后执行：
-
-```bash
-uv run --frozen python scripts/sync_contracts.py
-```
-
-完整性测试会检查副本是否被手工改动或忘记同步。
+Schema、校验器和共享数据模型来自独立的 `mtp-contracts-core` 包，本项目不保存契约
+副本。`pyproject.toml` 固定到 core 的 Git tag，升级契约时需要显式修改 tag 并提交
+更新后的 `uv.lock`。
 
 ## 当前部署边界
 

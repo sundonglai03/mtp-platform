@@ -33,7 +33,7 @@ from typing import Any
 from urllib.parse import urljoin, urlparse
 
 from .base import ActionResult, BaseTool, StepContext
-from ..contracts.errors import (
+from mtp_contracts.errors import (
     ConfigError,
     NetworkError,
     PolicyDeniedError,

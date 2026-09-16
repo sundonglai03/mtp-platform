@@ -9,7 +9,7 @@ import json
 
 import pytest
 
-from mtp_platform.contracts import (
+from mtp_contracts import (
     ActionResult,
     CaseResult,
     ConfigError,
@@ -22,7 +22,7 @@ from mtp_platform.contracts import (
     classify_exception,
     redact,
 )
-from mtp_platform.contracts.case_validator import SUPPORTED_SCHEMA_VERSIONS
+from mtp_contracts.case_validator import SUPPORTED_SCHEMA_VERSIONS
 
 
 def test_result_models_are_json_serializable():

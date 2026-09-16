@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from mtp_platform.contracts.adapters import ActionResult
-from mtp_platform.contracts.errors import ConfigError
+from mtp_contracts.adapters import ActionResult
+from mtp_contracts.errors import ConfigError
 from mtp_platform.tools.registry import ToolRegistry
 
 

@@ -11,9 +11,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..contracts.adapters import ActionResult, StepContext
-from ..contracts.config import PlatformConfig
-from ..contracts.errors import ConfigError, MtpError, classify_exception
+from mtp_contracts.adapters import ActionResult, StepContext
+from mtp_contracts.config import PlatformConfig
+from mtp_contracts.errors import ConfigError, MtpError, classify_exception
 
 __all__ = ["ActionResult", "StepContext", "BaseTool"]
 

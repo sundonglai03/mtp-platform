@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from mtp_platform.contracts.adapters import StepContext
-from mtp_platform.contracts.config import PlatformConfig
+from mtp_contracts.adapters import StepContext
+from mtp_contracts.config import PlatformConfig
 from mtp_platform.tools import mysql as mysql_module
 from mtp_platform.tools.mysql import MysqlTool
 

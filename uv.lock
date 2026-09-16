@@ -768,13 +768,22 @@ wheels = [
 ]
 
 [[package]]
+name = "mtp-contracts-core"
+version = "0.1.0"
+source = { git = "https://github.com/sundonglai03/mtp-contracts-core.git?tag=v0.1.0#1b740b79adcd3e6fee295cc1c0d616c8fb683823" }
+dependencies = [
+    { name = "jsonschema" },
+    { name = "pyyaml" },
+]
+
+[[package]]
 name = "mtp-platform"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "jinja2" },
     { name = "jsonpath-ng" },
-    { name = "jsonschema" },
+    { name = "mtp-contracts-core" },
     { name = "pyyaml" },
     { name = "requests" },
 ]
@@ -801,7 +810,7 @@ ssh = [
 requires-dist = [
     { name = "jinja2", specifier = ">=3.1" },
     { name = "jsonpath-ng", specifier = ">=1.6" },
-    { name = "jsonschema", specifier = ">=4.20" },
+    { name = "mtp-contracts-core", git = "https://github.com/sundonglai03/mtp-contracts-core.git?tag=v0.1.0" },
     { name = "openpyxl", marker = "extra == 'office'", specifier = ">=3.1" },
     { name = "paramiko", marker = "extra == 'ssh'", specifier = ">=3.4" },
     { name = "playwright", marker = "extra == 'playwright'", specifier = ">=1.40" },

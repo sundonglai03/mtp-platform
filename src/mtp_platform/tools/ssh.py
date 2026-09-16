@@ -18,8 +18,8 @@ import time
 from pathlib import Path
 from typing import Any
 
-from ..contracts.adapters import ActionResult, StepContext
-from ..contracts.errors import ConfigError, PolicyDeniedError, ToolExecutionError
+from mtp_contracts.adapters import ActionResult, StepContext
+from mtp_contracts.errors import ConfigError, PolicyDeniedError, ToolExecutionError
 from .base import BaseTool
 
 try:  # 未安装 paramiko 时给出明确提示，而不是 ImportError 炸栈

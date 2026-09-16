@@ -22,8 +22,8 @@ import json
 import time
 from typing import Any
 
-from ..contracts.adapters import ActionResult, StepContext
-from ..contracts.errors import ConfigError, ToolExecutionError
+from mtp_contracts.adapters import ActionResult, StepContext
+from mtp_contracts.errors import ConfigError, ToolExecutionError
 from .base import BaseTool
 
 try:  # 未安装 playwright 时给出明确提示

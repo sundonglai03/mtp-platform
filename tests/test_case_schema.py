@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from mtp_platform.contracts.case_validator import iter_steps, load_case, validate_case, validate_file
+from mtp_contracts.case_validator import iter_steps, load_case, validate_case, validate_file
 
 CASES = Path(__file__).resolve().parent / "cases"
 VALID = sorted((CASES / "valid").glob("*.yaml"))

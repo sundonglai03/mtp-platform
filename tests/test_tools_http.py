@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from mtp_platform.contracts.adapters import StepContext
-from mtp_platform.contracts.errors import (
+from mtp_contracts.adapters import StepContext
+from mtp_contracts.errors import (
     AuthenticationError,
     ConfigError,
     McpUnavailableError,
@@ -24,7 +24,7 @@ from mtp_platform.contracts.errors import (
     classify_exception,
 )
 from mtp_platform.config import load_config
-from mtp_platform.contracts.redaction import SecretRegistry, redact
+from mtp_contracts.redaction import SecretRegistry, redact
 
 
 @pytest.fixture(scope="module")

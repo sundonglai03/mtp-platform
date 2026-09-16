@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ..contracts.redaction import DEFAULT_PLACEHOLDER, DEFAULT_REDACT_KEYS, SecretRegistry, redact, redact_text
+from mtp_contracts.redaction import DEFAULT_PLACEHOLDER, DEFAULT_REDACT_KEYS, SecretRegistry, redact, redact_text
 
 _SAFE = re.compile(r"[^A-Za-z0-9._-]+")
 

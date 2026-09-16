@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from ..contracts.results import CaseResult, RunState
+from mtp_contracts.results import CaseResult, RunState
 
 REPORT_SCHEMA_VERSION = 1
 
