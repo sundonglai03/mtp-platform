@@ -20,18 +20,13 @@ RUN uv sync --no-dev --frozen \
     --extra ssh --extra mysql --extra playwright \
     --no-install-project
 
-# 再装本包源码
-COPY src ./src
-COPY mtp_config.yaml ./mtp_config.yaml
-RUN uv sync --no-dev --frozen \
-    --extra ssh --extra mysql --extra playwright
-
 ENV PATH="/app/.venv/bin:$PATH" \
     MTP_ARTIFACT_ROOT=/app/artifacts \
-    PLAYWRIGHT_BROWSERS_PATH=/app/browsers
+    PLAYWRIGHT_BROWSERS_PATH=/app/browsers \
+    PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT=120000
 
-# 浏览器内核（只有浏览器用例需要；约 300MB）。
-# 不需要就 `--build-arg MTP_INSTALL_BROWSER=0`，镜像会小很多。
+# 浏览器层必须放在 COPY src 之前：业务源码变化不会迫使 Docker 再下载浏览器。
+# 新机器首次构建仍会下载；网络瞬断时最多重试三次。
 ARG MTP_INSTALL_BROWSER=1
 RUN if [ "$MTP_INSTALL_BROWSER" = "1" ]; then \
       for attempt in 1 2 3; do \
@@ -39,6 +34,12 @@ RUN if [ "$MTP_INSTALL_BROWSER" = "1" ]; then \
         [ "$attempt" = 3 ] && exit 1; \
       done; \
     fi
+
+# 再装本包源码
+COPY src ./src
+COPY mtp_config.yaml ./mtp_config.yaml
+RUN uv sync --no-dev --frozen \
+    --extra ssh --extra mysql --extra playwright
 
 EXPOSE 8080
 CMD ["uvicorn", "mtp_platform.web.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8080"]
