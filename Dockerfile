@@ -2,7 +2,7 @@ FROM python:3.12-slim
 
 ARG UV_VERSION=0.12.5
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git ca-certificates \
+    && apt-get install -y --no-install-recommends git ca-certificates gosu \
     && rm -rf /var/lib/apt/lists/*
 RUN pip install --no-cache-dir "uv==$UV_VERSION"
 
@@ -35,11 +35,12 @@ ENV PATH="/app/.venv/bin:$PATH" \
 ARG MTP_INSTALL_BROWSER=1
 RUN if [ "$MTP_INSTALL_BROWSER" = "1" ]; then playwright install --with-deps chromium; fi
 
-# 非 root 运行
+# 启动入口只用 root 修复 bind mount 所有权，随后立即降权为 mtp。
 RUN useradd -m -u 1000 mtp \
     && mkdir -p /app/artifacts \
     && chown -R mtp:mtp /app
-USER mtp
+COPY docker-entrypoint.sh /usr/local/bin/mtp-entrypoint
+RUN chmod 0755 /usr/local/bin/mtp-entrypoint
 
-ENTRYPOINT ["mtp"]
+ENTRYPOINT ["mtp-entrypoint"]
 CMD ["--help"]

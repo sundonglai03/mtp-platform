@@ -26,6 +26,10 @@ docker compose run --rm mtp-platform run /app/cases --office
 
 任务完成后容器退出，报告保留在宿主机的 `artifacts/`。镜像名为 `mtp-platform:0.1.0`，容器名为 `mtp-platform`。
 
+镜像入口会在启动时修复 `/app/artifacts` 绑定目录的所有权，然后立即降权为 `mtp`
+用户执行命令。因此即使 Linux 上的 `./artifacts` 是由 root 或 Docker 自动创建，也
+不需要使用 `chmod 777`，测试执行进程仍保持非 root。
+
 ## 工作流程
 
 ```text
