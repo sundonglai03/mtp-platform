@@ -42,5 +42,6 @@ RUN useradd -m -u 1000 mtp \
 COPY docker-entrypoint.sh /usr/local/bin/mtp-entrypoint
 RUN chmod 0755 /usr/local/bin/mtp-entrypoint
 
+EXPOSE 8080
 ENTRYPOINT ["mtp-entrypoint"]
-CMD ["--help"]
+CMD ["serve", "--host", "0.0.0.0", "--port", "8080"]
