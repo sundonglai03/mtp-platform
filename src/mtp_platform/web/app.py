@@ -9,6 +9,7 @@ import json
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any
+from uuid import uuid4
 
 from fastapi import (
     Depends,
@@ -25,7 +26,6 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from mtp_contracts.case_validator import validate_case
-from mtp_contracts.results import new_run_id
 from starlette.middleware.sessions import SessionMiddleware
 
 from mtp_platform.config import load_config
@@ -34,7 +34,6 @@ from mtp_platform.service.repository import RunRepository
 
 WEB_ROOT = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(WEB_ROOT / "templates"))
-SUITE_FILENAME = "test-suite.json"
 
 
 def _positive_int(name: str, default: int) -> int:
@@ -368,7 +367,7 @@ def create_app(*, config_path: str | None = None) -> FastAPI:
                 detail={"message": "一次必须上传一个 JSON 测试套件文件", "errors": []},
             )
         upload = suite[0]
-        run_id = new_run_id()
+        run_id = str(uuid4())
         upload_root = (artifacts_root / "uploads" / run_id).resolve()
         upload_root.mkdir(parents=True, exist_ok=False)
         try:
@@ -380,10 +379,10 @@ def create_app(*, config_path: str | None = None) -> FastAPI:
                 or Path(supplied_name).is_absolute()
                 or ".." in Path(supplied_name).parts
             )
-            if unsafe_name or original_name != SUITE_FILENAME:
+            if unsafe_name or Path(original_name).suffix.lower() != ".json":
                 raise HTTPException(
                     status_code=422,
-                    detail={"message": "只允许上传一个 test-suite.json 文件", "errors": []},
+                    detail={"message": "只允许上传一个 JSON 测试套件文件", "errors": []},
                 )
 
             target = upload_root / "suite.json"

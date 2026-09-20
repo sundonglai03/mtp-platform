@@ -107,6 +107,7 @@ def test_one_test_suite_creates_only_minimal_sqlite_result(web_client):
     response = _post_suite(client, content=_suite(VALID_CASE, VALID_CASE | {"id": "WEB-002"}))
     assert response.status_code == 202
     run_id = response.json()["run_id"]
+    assert re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", run_id)
     for _ in range(50):
         run = client.get(f"/api/runs/{run_id}").json()
         if run["status"] == "passed":
@@ -127,19 +128,20 @@ def test_one_test_suite_creates_only_minimal_sqlite_result(web_client):
 
 
 @pytest.mark.parametrize(
-    ("name", "content", "code"),
+    ("name", "content", "status_code", "code"),
     [
-        ("suite.json", VALID_SUITE, None),
-        ("test-suite.json", b"not json", "invalid_json"),
-        ("test-suite.json", INVALID_SUITE, "schema"),
-        ("test-suite.json", _suite(VALID_CASE, VALID_CASE), "duplicate_id"),
+        ("my-suite.json", VALID_SUITE, 202, None),
+        ("suite.txt", VALID_SUITE, 422, None),
+        ("suite.json", b"not json", 422, "invalid_json"),
+        ("suite.json", INVALID_SUITE, 422, "schema"),
+        ("suite.json", _suite(VALID_CASE, VALID_CASE), 422, "duplicate_id"),
     ],
 )
-def test_rejects_invalid_suite_as_one_request(web_client, name, content, code):
+def test_accepts_any_json_filename_and_validates_its_contents(web_client, name, content, status_code, code):
     client, _app = web_client
     _login(client)
     response = _post_suite(client, name=name, content=content)
-    assert response.status_code == 422
+    assert response.status_code == status_code
     if code:
         assert response.json()["detail"]["errors"][0]["code"] == code
 

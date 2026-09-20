@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}新建任务 · MTP 测试平台{% endblock %}
 {% block content %}
-<div class="page-heading"><div><h1>新建测试任务</h1><p class="muted">上传唯一的 <code>test-suite.json</code>，其中必须包含非空 <code>cases</code> 数组。</p></div></div>
+<div class="page-heading"><div><h1>新建测试任务</h1><p class="muted">上传一个 JSON 测试套件，其中必须包含非空 <code>cases</code> 数组。</p></div></div>
 <section class="card">
   <div id="form-error" class="alert error hidden"></div>
   <form id="run-form" action="/api/runs" method="post" enctype="multipart/form-data" class="stack">
