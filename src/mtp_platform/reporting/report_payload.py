@@ -66,7 +66,11 @@ def build_payload(
             "assertions_total": assertions_total,
             "assertions_failed": assertions_failed,
             "duration_ms": total_duration,
-            "success": buckets["failed"] == 0 and buckets["error"] == 0,
+            "success": (
+                buckets["failed"] == 0
+                and buckets["error"] == 0
+                and buckets["cancelled"] == 0
+            ),
         },
         "cases": cases,
     }

@@ -191,10 +191,15 @@ class TestRunner:
     # 单用例执行
     # ------------------------------------------------------------------
     def run_case_file(
-        self, path: str | Path, *, run_id: str | None = None, handle: _RunHandle | None = None
+        self,
+        path: str | Path,
+        *,
+        run_id: str | None = None,
+        handle: _RunHandle | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> CaseResult:
         rid = run_id or new_run_id()
-        cancel_event = handle.cancel_event if handle else threading.Event()
+        active_cancel_event = handle.cancel_event if handle else (cancel_event or threading.Event())
         store = EvidenceStore(
             self.artifacts_root,
             rid,
@@ -218,7 +223,7 @@ class TestRunner:
             )
             return result
 
-        return self.run_case(case, run_id=rid, store=store, cancel_event=cancel_event)
+        return self.run_case(case, run_id=rid, store=store, cancel_event=active_cancel_event)
 
     def run_case(
         self,

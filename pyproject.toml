@@ -14,6 +14,10 @@ dependencies = [
     "Jinja2>=3.1",
     "jsonpath-ng>=1.6",
     "requests>=2.31",          # http 直连工具
+    "fastapi>=0.115",
+    "uvicorn>=0.34",
+    "python-multipart>=0.0.20",
+    "itsdangerous>=2.2",
 ]
 
 # 直连工具的重依赖按工具拆成独立 extra
@@ -22,7 +26,7 @@ ssh = ["paramiko>=3.4"]
 mysql = ["PyMySQL>=1.1"]
 playwright = ["playwright>=1.40"]
 office = ["openpyxl>=3.1", "python-docx>=1.1"]
-dev = ["pytest>=9.0"]
+dev = ["pytest>=9.0", "httpx>=0.28"]
 
 [project.scripts]
 mtp = "mtp_platform.cli:main"
@@ -32,6 +36,9 @@ mtp-contracts-core = { git = "https://github.com/sundonglai03/mtp-contracts-core
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+mtp_platform = ["web/templates/*.html", "web/static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

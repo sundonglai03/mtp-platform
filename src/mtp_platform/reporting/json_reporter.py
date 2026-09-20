@@ -19,6 +19,7 @@ def write_json(
     allow_write: bool = False,
     config_path: str = "",
     filename: str = "results.json",
+    force_failure: bool = False,
 ) -> dict[str, Any]:
     """写 `results.json`，返回载荷本身（调用方还要用它喂 JUnit / HTML）。"""
     payload = build_payload(
@@ -29,6 +30,8 @@ def write_json(
         allow_write=allow_write,
         config_path=config_path,
     )
+    if force_failure:
+        payload["summary"]["success"] = False
 
     directory = Path(out_dir)
     directory.mkdir(parents=True, exist_ok=True)

@@ -5,7 +5,7 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from mtp_platform.cli import _collect
+from mtp_platform.cli import _collect, build_parser
 
 CASE = "schema_version: 1\nid: X\ntitle: t\nsteps: []\n"
 
@@ -40,3 +40,9 @@ def test_collect_dedupes_and_handles_missing_targets(capsys):
 
     assert [p.name for p in found] == ["a.yaml"]
     assert "找不到" in capsys.readouterr().err
+
+
+def test_serve_command_defaults():
+    args = build_parser().parse_args(["serve"])
+    assert args.host == "127.0.0.1"
+    assert args.port == 8080

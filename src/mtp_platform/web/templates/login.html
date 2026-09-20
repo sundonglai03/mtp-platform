@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}登录 · MTP 测试平台{% endblock %}
+{% block content %}
+<section class="card login-card">
+  <h1>登录</h1>
+  <p class="muted">登录后可以上传用例、执行测试并下载报告。</p>
+  {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+  <form method="post" action="/login" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>用户名<input name="username" autocomplete="username" required autofocus></label>
+    <label>密码<input type="password" name="password" autocomplete="current-password" required></label>
+    <button type="submit">登录</button>
+  </form>
+</section>
+{% endblock %}

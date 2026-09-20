@@ -17,22 +17,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from mtp_platform.audit import AuditLog
-from mtp_platform.config import load_config
 from mtp_contracts.case_validator import load_case, validate_file
-from mtp_contracts.results import new_run_id, now_iso
-from mtp_platform.engine import TestRunner
-from mtp_platform.reporting import (
-    append as append_history,
-    format_trend,
-    status_line,
-    write_html,
-    write_json,
-    write_junit,
-    write_office_reports,
-)
-from mtp_platform.tools.registry import ToolRegistry
 
+from mtp_platform.config import load_config
+from mtp_platform.reporting import format_trend
+from mtp_platform.service.executor import RunExecutor, RunRequest, format_outcome
+from mtp_platform.tools.registry import ToolRegistry
 
 # 收集用例时跳过的目录/文件名：这些是**平台自己的产物**，不是用例。
 # 不跳过的话，把 --out 指到用例目录里时，上一轮的 results.json 会被当用例再跑一遍。
@@ -141,7 +131,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 # run
 # ---------------------------------------------------------------------------
 def cmd_run(args: argparse.Namespace) -> int:
-    config = load_config(args.config)
+    # Preserve the CLI's fail-fast configuration check before target collection.
+    load_config(args.config)
     cases = _collect(args.targets)
     if not cases:
         print("!! 没有找到任何用例文件", file=sys.stderr)
@@ -156,103 +147,33 @@ def cmd_run(args: argparse.Namespace) -> int:
     if args.allow_write:
         print("⚠  已开启 --allow-write：用例中的写操作（insert/update/delete）会被放行")
 
-    run_id = args.run_id or new_run_id()
-    started_at = now_iso()
+    def emit(message: str, is_error: bool) -> None:
+        print(message, file=sys.stderr if is_error else sys.stdout)
 
-    audit = AuditLog(
-        config.artifact_root() / "_audit" / f"{run_id}.jsonl",
-        redact_keys=config.redact_keys(),
-        placeholder=config.redact_placeholder(),
+    outcome = RunExecutor().execute(
+        RunRequest(
+            case_paths=cases,
+            config_path=args.config,
+            allow_write=args.allow_write,
+            office=args.office,
+            run_id=args.run_id,
+            output_dir=Path(args.out) if args.out else None,
+        ),
+        emit=emit,
     )
-    audit.run_start(run_id=run_id, cases=[str(c) for c in cases], allow_write=args.allow_write)
+    for line in format_outcome(outcome, office_requested=args.office):
+        print(line)
+    return outcome.exit_code
 
-    runner = TestRunner(
-        config,
-        registry=ToolRegistry(config),
-        allow_write=args.allow_write,
-        artifacts_root=config.artifact_root(),
-        audit=audit,
-    )
-    results = []
-    try:
-        for path in cases:
-            print(f"▶  执行 {path}")
-            result = runner.run_case_file(path, run_id=run_id)
-            results.append(result)
-            mark = {"passed": "PASS", "failed": "FAIL", "error": "ERR "}.get(
-                result.status.value, result.status.value.upper()
-            )
-            print(f"   [{mark}] {result.case_id}  {result.duration_ms}ms")
-            failure = result.first_failure()
-            if failure and not result.passed:
-                if failure.get("kind") == "step":
-                    print(f"          失败步骤: {failure.get('step_id')} — {failure.get('summary')}")
-                elif failure.get("kind") == "assertion":
-                    print(f"          失败断言: {failure.get('id')} — {failure.get('message')}")
-                else:
-                    print(f"          用例错误: {failure.get('message')}")
-            for warning in result.warnings:
-                print(f"          ⚠ {warning}")
-    finally:
-        runner.close()
 
-    finished_at = now_iso()
-    out_dir = Path(args.out) if args.out else config.report_dir()
+def cmd_serve(args: argparse.Namespace) -> int:
+    """Run the authenticated HTTP service."""
+    import uvicorn
 
-    payload = write_json(
-        results,
-        out_dir,
-        run_id=run_id,
-        started_at=started_at,
-        finished_at=finished_at,
-        allow_write=args.allow_write,
-        config_path=str(config.path),
-        filename=f"{run_id}-results.json",
-    )
-    junit_path = write_junit(results, out_dir, run_id=run_id, filename=f"{run_id}-junit.xml")
-    html_path = write_html(payload, out_dir, filename=f"{run_id}-report.html")
+    from mtp_platform.web.app import create_app
 
-    # Office 是附加产物：缺依赖或生成失败只告警，不改变这次 run 的结论
-    office: dict = {"xlsx": None, "docx": None, "errors": []}
-    if args.office:
-        office = write_office_reports(payload, out_dir, filename_prefix=f"{run_id}-report")
-        for item in office["errors"]:
-            print(f"⚠  {item['kind']} 报告生成失败: {item['error']}", file=sys.stderr)
-
-    # 「最新」指针：方便 CI 固定路径收集
-    latest = out_dir / "latest"
-    latest.mkdir(parents=True, exist_ok=True)
-    for src, name in (
-        (payload["_written_to"], "results.json"),
-        (junit_path, "junit.xml"),
-        (html_path, "report.html"),
-        (office["xlsx"], "report.xlsx"),
-        (office["docx"], "report.docx"),
-    ):
-        if src:
-            (latest / name).write_bytes(Path(src).read_bytes())
-
-    append_history(payload, config.history_file())
-    audit.run_end(
-        run_id=run_id,
-        status="success" if payload["summary"]["success"] else "failure",
-        duration_ms=payload["summary"]["duration_ms"],
-        summary=payload["summary"],
-    )
-
-    print()
-    print(status_line(payload))
-    print(f"JSON : {payload['_written_to']}")
-    print(f"JUnit: {junit_path}")
-    print(f"HTML : {html_path}")
-    if office["xlsx"]:
-        print(f"Excel: {office['xlsx']}")
-    if office["docx"]:
-        print(f"Word : {office['docx']}")
-    if args.office and not (office["xlsx"] and office["docx"]):
-        print("（Office 报告不完整，见上面的告警）")
-
-    return 0 if payload["summary"]["success"] else 1
+    uvicorn.run(create_app(config_path=args.config), host=args.host, port=args.port)
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -306,6 +227,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_trend = _add_config(sub.add_parser("trend", help="历史趋势"))
     p_trend.add_argument("--limit", type=int, default=10)
 
+    p_serve = _add_config(sub.add_parser("serve", help="启动 HTTP 管理服务"))
+    p_serve.add_argument("--host", default="127.0.0.1")
+    p_serve.add_argument("--port", type=int, default=8080)
+
     sub.add_parser("version", help="打印版本")
     return parser
 
@@ -317,6 +242,7 @@ def main(argv: list[str] | None = None) -> int:
         "doctor": cmd_doctor,
         "run": cmd_run,
         "trend": cmd_trend,
+        "serve": cmd_serve,
         "version": cmd_version,
     }
     return handlers[args.command](args)

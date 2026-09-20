@@ -1,4 +1,4 @@
-# 自动化测试系统（独立部署，不与 contracts-mcp 共用 compose）
+# 自动化测试系统（独立部署，不与 mtp-contracts-mcp 共用 compose）
 name: mtp-platform
 
 services:
@@ -8,11 +8,22 @@ services:
     image: mtp-platform:0.1.0
     working_dir: /app
     environment:
-      # 产物落卷，不污染镜像层
       MTP_ARTIFACT_ROOT: /app/artifacts
+      MTP_WEB_USERNAME: ${MTP_WEB_USERNAME:-}
+      MTP_WEB_PASSWORD: ${MTP_WEB_PASSWORD:-}
+      MTP_SESSION_SECRET: ${MTP_SESSION_SECRET:-}
+      MTP_MAX_CONCURRENT_RUNS: ${MTP_MAX_CONCURRENT_RUNS:-1}
+      MTP_COOKIE_SECURE: ${MTP_COOKIE_SECURE:-false}
+    ports:
+      - "${MTP_HTTP_PORT:-8080}:8080"
     volumes:
       - ./artifacts:/app/artifacts
       # 用例与配置挂进来（示例，按需调整）
       - ./tests/cases:/app/cases:ro
-    # 默认跑一次校验；实际测试用 `docker compose run --rm mtp-platform run <cases>`
-    command: ["validate", "/app/cases/valid"]
+    command: ["serve", "--host", "0.0.0.0", "--port", "8080"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s

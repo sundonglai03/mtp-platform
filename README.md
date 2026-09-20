@@ -1,8 +1,6 @@
 # mtp-platform
 
-读取规范测试用例，直接调用 SSH、MySQL、Playwright 和 HTTP 工具，最后生成证据与测试报告。
-
-它是 CLI / Docker 批任务执行器，不依赖 MCP 协议，也不是常驻 HTTP 服务。
+读取规范测试用例，直接调用 SSH、MySQL、Playwright 和 HTTP 工具，最后生成证据与测试报告。既可以作为 CLI / Docker 批任务执行器，也可以作为带登录、上传、后台队列和报告下载的常驻 HTTP 服务；执行链路不依赖 MCP 协议。
 
 ## 快速开始
 
@@ -15,10 +13,39 @@ uv run --frozen mtp validate tests/cases/valid
 uv run --frozen mtp run tests/cases/valid --out artifacts/reports
 ```
 
-### Docker
+本地启动 Web 服务：
 
 ```bash
+export MTP_WEB_USERNAME=admin
+export MTP_WEB_PASSWORD='替换为高强度密码'
+export MTP_SESSION_SECRET="$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')"
+uv run --frozen mtp serve --host 0.0.0.0 --port 8080
+```
+
+### Web 常驻服务（Docker）
+
+```bash
+export MTP_WEB_USERNAME=admin
+export MTP_WEB_PASSWORD='替换为高强度密码'
+export MTP_SESSION_SECRET="$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')"
 docker compose build
+docker compose up -d
+docker compose ps
+```
+
+打开 `http://<服务器IP>:8080`，登录后即可上传 YAML、YML 或 JSON 用例。用户名、密码和 Session 密钥没有默认生产值；缺少其中任意一个时 Web 服务会拒绝启动。
+
+公网部署请在前面使用 Nginx/Caddy 配置 HTTPS，并设置：
+
+```bash
+export MTP_COOKIE_SECURE=true
+```
+
+任务元数据保存在 `artifacts/mtp-platform.sqlite3`，上传文件位于 `artifacts/uploads/<run_id>/`，每次任务的证据和报告位于 `artifacts/runs/<run_id>/`。重启容器后历史任务仍可查询；中断时仍在运行的任务会标记为 `error`，排队任务会继续执行。
+
+### 一次性 CLI（Docker）
+
+```bash
 docker compose run --rm mtp-platform doctor
 docker compose run --rm mtp-platform validate /app/cases/valid
 docker compose run --rm mtp-platform run /app/cases --office
@@ -53,6 +80,7 @@ JSON / JUnit / HTML / Excel / Word 报告
 | `mtp doctor` | 检查配置路径和工具依赖 |
 | `mtp validate <路径>` | 校验一个用例或用例目录 |
 | `mtp run <路径>` | 执行用例并生成报告 |
+| `mtp serve` | 启动 HTTP 管理服务 |
 
 完整参数使用 `mtp --help` 或 `mtp <子命令> --help` 查看。
 
@@ -63,6 +91,8 @@ src/mtp_platform/
 ├── engine/      # 编排、断言、证据和执行历史
 ├── tools/       # SSH、MySQL、Playwright、HTTP 直连工具
 ├── reporting/   # JSON、JUnit、HTML、Excel、Word 报告
+├── service/     # CLI/Web 共用执行服务、SQLite 和后台任务队列
+├── web/         # FastAPI、登录、页面和静态资源
 └── cli.py       # `mtp` 命令入口
 ```
 
@@ -100,6 +130,14 @@ docker build --build-arg MTP_INSTALL_BROWSER=0 -t mtp-platform:0.1.0 .
 | `MTP_ROOT` | 项目和相对路径的解析根目录 |
 | `MTP_ARTIFACT_ROOT` | 证据、下载文件、报告和历史记录目录 |
 | `PLAYWRIGHT_BROWSERS_PATH` | 共享 Playwright 浏览器内核目录 |
+| `MTP_WEB_USERNAME` | Web 登录用户名，启动 Web 服务时必填 |
+| `MTP_WEB_PASSWORD` | Web 登录密码，启动 Web 服务时必填 |
+| `MTP_SESSION_SECRET` | Session 签名密钥，启动 Web 服务时必填 |
+| `MTP_HTTP_PORT` | Compose 对外端口，默认 `8080` |
+| `MTP_MAX_CONCURRENT_RUNS` | 后台任务并发数，默认 `1` |
+| `MTP_MAX_UPLOAD_BYTES` | 单文件上限，默认 `2097152`（2 MiB） |
+| `MTP_MAX_UPLOAD_FILES` | 单次上传文件数上限，默认 `20` |
+| `MTP_COOKIE_SECURE` | 是否仅通过 HTTPS 发送 Session Cookie |
 
 默认安全策略包括：
 
@@ -117,9 +155,26 @@ Schema、校验器和共享数据模型来自独立的 `mtp-contracts-core` 包�
 副本。`pyproject.toml` 固定到 core 的 Git tag，升级契约时需要显式修改 tag 并提交
 更新后的 `uv.lock`。
 
-## 当前部署边界
+## HTTP 接口
 
-当前每次 `mtp run` 对应一个测试任务。若以后需要网页或 Agent 通过 HTTP 提交任务，应在本项目外层增加 API、任务队列和执行 Worker；不要把任务执行能力放进 `mtp-contracts-mcp`。
+除健康检查和登录外，页面、任务 API、报告和证据均需要认证；修改操作还需要 CSRF Token。
+
+| 方法 | 路径 | 作用 |
+| --- | --- | --- |
+| GET | `/healthz` | 健康检查 |
+| GET/POST | `/login` | 登录页面和登录提交 |
+| POST | `/logout` | 退出登录 |
+| GET | `/` | 任务列表 |
+| GET | `/runs/new` | 上传任务页面 |
+| GET | `/runs/{run_id}` | 任务详情页面 |
+| POST | `/api/runs` | 上传用例并创建任务 |
+| GET | `/api/runs` | 查询任务列表 |
+| GET | `/api/runs/{run_id}` | 查询任务状态与结果 |
+| POST | `/api/runs/{run_id}/cancel` | 取消任务 |
+| GET | `/api/runs/{run_id}/reports/{filename}` | 下载报告 |
+| GET | `/api/runs/{run_id}/evidence/{path}` | 下载证据 |
+
+Web 第一版面向单机单容器部署，SQLite 不用于多副本并行部署。默认一次只执行一个任务；即使提高并发数，也应先确认浏览器、目标环境和报告存储能够承受并发访问。
 
 ## 验证
 
