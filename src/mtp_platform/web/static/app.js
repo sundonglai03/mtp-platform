@@ -1,6 +1,14 @@
 "use strict";
 
 const csrf = document.querySelector('meta[name="csrf-token"]')?.content || "";
+const statusLabel = {
+  queued: "排队中",
+  running: "执行中",
+  passed: "成功",
+  failed: "失败",
+  error: "错误",
+  cancelled: "已取消",
+};
 
 function escapeHtml(value) {
   const node = document.createElement("div");
@@ -34,36 +42,33 @@ if (detail) {
   const runId = detail.dataset.runId;
   const terminal = new Set(["passed", "failed", "error", "cancelled"]);
 
-  function renderLinks(elementId, entries) {
-    const element = document.getElementById(elementId);
+  function renderEvidence(entries) {
+    const element = document.getElementById("evidence-links");
     element.innerHTML = entries.length
-      ? entries.map(([label, url]) => `<a href="${escapeHtml(url)}">${escapeHtml(label)}</a>`).join("")
+      ? entries.map((item) => item.mime_type === "image/png"
+        ? `<a href="${escapeHtml(item.url)}" target="_blank"><img src="${escapeHtml(item.url)}" alt="${escapeHtml(item.path)}" loading="lazy">${escapeHtml(item.path)}</a>`
+        : `<a href="${escapeHtml(item.url)}" download>${escapeHtml(item.path)}</a>`).join("")
       : '<span class="muted">暂无</span>';
-  }
-
-  function firstFailure(item) {
-    if (item.error) return item.error.message || JSON.stringify(item.error);
-    const step = (item.steps || []).find((value) => !["passed", "success"].includes(value.status));
-    if (step) return step.summary || step.error?.message || "步骤失败";
-    const assertion = (item.assertions || []).find((value) => !value.passed);
-    return assertion ? assertion.message : "";
   }
 
   function render(run) {
     const statusNode = document.getElementById("run-status");
-    statusNode.textContent = run.status;
+    statusNode.textContent = statusLabel[run.status] || run.status;
     statusNode.className = `status status-${run.status}`;
     document.getElementById("run-progress").textContent = `${run.cases_done}/${run.cases_total}`;
     document.getElementById("run-started").textContent = run.started_at || "-";
     document.getElementById("run-finished").textContent = run.finished_at || "-";
+    const started = Date.parse(run.started_at);
+    const finished = Date.parse(run.finished_at) || Date.now();
+    const elapsed = Number.isNaN(started) ? "-" : `${Math.max(0, Math.floor((finished - started) / 1000))} 秒`;
+    document.getElementById("run-duration").textContent = elapsed;
     const error = document.getElementById("run-error");
-    error.textContent = run.error || "";
-    error.classList.toggle("hidden", !run.error);
-    document.getElementById("case-results").innerHTML = (run.results || []).length
-      ? `<table><thead><tr><th>用例</th><th>状态</th><th>耗时</th><th>失败原因</th></tr></thead><tbody>${run.results.map((item) => `<tr><td>${escapeHtml(item.case_id)}</td><td><span class="status status-${escapeHtml(item.status)}">${escapeHtml(item.status)}</span></td><td>${escapeHtml(item.duration_ms)}ms</td><td>${escapeHtml(firstFailure(item))}</td></tr>`).join("")}</tbody></table>`
+    error.textContent = run.first_failure?.message || "";
+    error.classList.toggle("hidden", !run.first_failure);
+    document.getElementById("case-results").innerHTML = (run.cases || []).length
+      ? `<table><thead><tr><th>用例</th><th>状态</th><th>耗时</th></tr></thead><tbody>${run.cases.map((item) => `<tr><td>${escapeHtml(item.case_id)}</td><td><span class="status status-${escapeHtml(item.status)}">${escapeHtml(item.status)}</span></td><td>${escapeHtml(item.duration_ms)}ms</td></tr>`).join("")}</tbody></table>`
       : '<p class="muted">等待执行结果。</p>';
-    renderLinks("report-links", Object.entries(run.report_urls || {}));
-    renderLinks("evidence-links", (run.evidence || []).map((item) => [item.path, item.url]));
+    renderEvidence(run.evidence || []);
     document.getElementById("cancel-run").disabled = terminal.has(run.status);
     return terminal.has(run.status);
   }

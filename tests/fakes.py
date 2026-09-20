@@ -35,15 +35,6 @@ class FakeRegistry:
             )
         return self._adapters[name]
 
-    def health(self) -> dict[str, bool | str]:
-        report: dict[str, bool | str] = {}
-        for name, adapter in self._adapters.items():
-            try:
-                report[name] = bool(adapter.health())
-            except Exception as exc:  # noqa: BLE001 - 诊断场景
-                report[name] = f"unavailable: {type(exc).__name__}: {exc}"
-        return report
-
     def close_all(self) -> None:
         for adapter in list(self._adapters.values()):
             try:

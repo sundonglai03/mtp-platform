@@ -66,8 +66,5 @@ class BaseTool:
                 adapter=self.name,
             )
 
-    def health(self) -> bool:
-        return True
-
     def close(self) -> None:
         return None

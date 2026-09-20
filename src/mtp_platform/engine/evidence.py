@@ -6,14 +6,14 @@
 
 1. **关联可追溯**：每份证据都带 `run_id / case_id / step_id`，所以失败用例能
    一路定位到具体步骤；
-2. **大文件走引用**：超过 `inline_max_bytes` 的内容落盘，JSON 里只留相对路径 +
-   摘要 + sha256，报告不会被几 MB 的 base64 撑爆；
+2. **结果只留元数据**：所有内容均落盘；SQLite/API 只保存路径、MIME 类型和大小，
+   不嵌入 Base64 或报告内容；
 3. **落盘前脱敏**：所有文本/JSON 在写文件之前先过 `redact`，
    证据目录里不允许出现凭据原文。
 
 目录结构::
 
-    artifacts/<run_id>/<case_id>/<step_id>/<name>
+    artifacts/runs/<run_id>/evidence/<case_id>/<step_id>/<name>
 """
 
 from __future__ import annotations
@@ -21,8 +21,8 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import mimetypes
 import re
-import shutil
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -50,7 +50,7 @@ class EvidenceRef:
     bytes: int = 0
     sha256: str = ""
     summary: str = ""
-    inline: Any = None
+    mime_type: str = "application/octet-stream"
     created_at: float = field(default_factory=time.time)
 
     def to_dict(self) -> dict[str, Any]:
@@ -61,14 +61,13 @@ class EvidenceRef:
             "case_id": self.case_id,
             "step_id": self.step_id,
             "bytes": self.bytes,
+            "mime_type": self.mime_type,
             "summary": self.summary,
         }
         if self.path:
             out["path"] = self.path
         if self.sha256:
             out["sha256"] = self.sha256
-        if self.inline is not None:
-            out["inline"] = self.inline
         return out
 
 
@@ -78,14 +77,12 @@ class EvidenceStore:
         root: str | Path,
         run_id: str,
         *,
-        inline_max_bytes: int = 8192,
         registry: SecretRegistry | None = None,
         redact_keys: list[str] | None = None,
         placeholder: str = DEFAULT_PLACEHOLDER,
     ) -> None:
         self.root = Path(root)
         self.run_id = run_id
-        self.inline_max_bytes = int(inline_max_bytes)
         self.registry = registry or SecretRegistry()
         self.redact_keys = list(redact_keys or DEFAULT_REDACT_KEYS)
         self.placeholder = placeholder
@@ -98,9 +95,7 @@ class EvidenceStore:
         return f"{kind}-{self._counter:04d}"
 
     def _dir(self, case_id: str, step_id: str) -> Path:
-        path = self.root / _safe(self.run_id, "run") / _safe(case_id, "case") / _safe(
-            step_id, "step"
-        )
+        path = self.root / "evidence" / _safe(case_id, "case") / _safe(step_id, "step")
         path.mkdir(parents=True, exist_ok=True)
         return path
 
@@ -144,12 +139,10 @@ class EvidenceStore:
             sha256=hashlib.sha256(raw).hexdigest()[:16],
             summary=summary or f"{kind} {len(raw)} 字节",
         )
-        if len(raw) <= self.inline_max_bytes:
-            ref.inline = cleaned
-        else:
-            target = self._dir(case_id, step_id) / f"{_safe(name)}{ext}"
-            target.write_bytes(raw)
-            ref.path = self._relative(target)
+        target = self._dir(case_id, step_id) / f"{_safe(name)}{ext}"
+        target.write_bytes(raw)
+        ref.path = self._relative(target)
+        ref.mime_type = mimetypes.guess_type(target.name)[0] or "text/plain"
         return self._add(ref)
 
     def save_json(
@@ -192,6 +185,7 @@ class EvidenceStore:
             step_id=step_id,
             path=self._relative(target),
             bytes=len(raw),
+            mime_type=mimetypes.guess_type(target.name)[0] or "application/octet-stream",
             sha256=hashlib.sha256(raw).hexdigest()[:16],
             summary=summary or f"{kind} {len(raw)} 字节",
         )
@@ -245,22 +239,3 @@ class EvidenceStore:
 
     def to_list(self) -> list[dict[str, Any]]:
         return [r.to_dict() for r in self._refs]
-
-    # -- 维护 ---------------------------------------------------------------
-    def cleanup_expired(self, retention_days: int, *, now: float | None = None) -> list[str]:
-        """删除超过保留期的 run 目录。返回被删除的 run_id 列表。"""
-        removed: list[str] = []
-        if not self.root.exists() or retention_days <= 0:
-            return removed
-        cutoff = (now or time.time()) - retention_days * 86400
-        for child in sorted(self.root.iterdir()):
-            if not child.is_dir() or child.name == _safe(self.run_id, "run"):
-                continue
-            try:
-                newest = max((p.stat().st_mtime for p in child.rglob("*")), default=child.stat().st_mtime)
-            except OSError:
-                continue
-            if newest < cutoff:
-                shutil.rmtree(child, ignore_errors=True)
-                removed.append(child.name)
-        return removed

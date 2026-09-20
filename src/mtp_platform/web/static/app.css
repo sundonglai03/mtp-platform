@@ -45,5 +45,6 @@ th { color: #667085; font-size: 13px; }
 .metrics span:first-child { color: #667085; font-size: 13px; }
 .links { display: flex; flex-wrap: wrap; gap: 12px; }
 .links a { background: #eef3ff; border-radius: 6px; padding: 7px 10px; }
+.links img { display: block; max-width: min(100%, 480px); max-height: 320px; margin-bottom: 8px; }
 code { word-break: break-all; }
 @media (max-width: 760px) { .metrics { grid-template-columns: 1fr 1fr; } .page-heading { align-items: flex-start; flex-direction: column; } }

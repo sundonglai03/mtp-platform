@@ -1,4 +1,4 @@
-"""SQLite persistence for Web initiated test runs."""
+"""SQLite persistence for the minimal Web task result."""
 
 from __future__ import annotations
 
@@ -22,7 +22,6 @@ class RunRepository:
         connection = sqlite3.connect(self.path, timeout=30)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA journal_mode=WAL")
-        connection.execute("PRAGMA foreign_keys=ON")
         return connection
 
     def _initialize(self) -> None:
@@ -39,14 +38,25 @@ class RunRepository:
                     options_json TEXT NOT NULL,
                     cases_total INTEGER NOT NULL DEFAULT 0,
                     cases_done INTEGER NOT NULL DEFAULT 0,
-                    results_json TEXT NOT NULL DEFAULT '[]',
-                    summary_json TEXT NOT NULL DEFAULT '{}',
-                    reports_json TEXT NOT NULL DEFAULT '{}',
-                    validation_errors_json TEXT NOT NULL DEFAULT '[]',
+                    cases_json TEXT NOT NULL DEFAULT '[]',
+                    summary_json TEXT NOT NULL DEFAULT '{"passed": 0, "failed": 0, "error": 0, "cancelled": 0}',
+                    first_failure_json TEXT,
+                    evidence_json TEXT NOT NULL DEFAULT '[]',
                     error TEXT
                 )
                 """
             )
+            # 旧版本有 reports/results 等字段，但没有最小结果所需的 cases、
+            # first_failure、evidence 字段。只追加，不删除既有任务。
+            existing = {row["name"] for row in db.execute("PRAGMA table_info(runs)")}
+            migrations = {
+                "cases_json": "TEXT NOT NULL DEFAULT '[]'",
+                "first_failure_json": "TEXT",
+                "evidence_json": "TEXT NOT NULL DEFAULT '[]'",
+            }
+            for name, definition in migrations.items():
+                if name not in existing:
+                    db.execute(f"ALTER TABLE runs ADD COLUMN {name} {definition}")
 
     def recover_interrupted(self) -> None:
         with self._connect() as db:
@@ -66,15 +76,13 @@ class RunRepository:
         run_id: str,
         uploads: list[str],
         options: dict[str, Any],
-        validation_errors: list[dict[str, Any]],
     ) -> None:
         with self._connect() as db:
             db.execute(
                 """
                 INSERT INTO runs (
-                    run_id, status, created_at, uploads_json, options_json,
-                    cases_total, validation_errors_json
-                ) VALUES (?, 'queued', ?, ?, ?, ?, ?)
+                    run_id, status, created_at, uploads_json, options_json, cases_total
+                ) VALUES (?, 'queued', ?, ?, ?, ?)
                 """,
                 (
                     run_id,
@@ -82,7 +90,6 @@ class RunRepository:
                     json.dumps(uploads, ensure_ascii=False),
                     json.dumps(options, ensure_ascii=False),
                     len(uploads),
-                    json.dumps(validation_errors, ensure_ascii=False),
                 ),
             )
 
@@ -92,9 +99,10 @@ class RunRepository:
             "started_at",
             "finished_at",
             "cases_done",
-            "results_json",
+            "cases_json",
             "summary_json",
-            "reports_json",
+            "first_failure_json",
+            "evidence_json",
             "error",
         }
         unknown = set(fields) - allowed
@@ -108,7 +116,6 @@ class RunRepository:
             db.execute(f"UPDATE runs SET {columns} WHERE run_id = ?", values)
 
     def claim(self, run_id: str) -> bool:
-        """Atomically move one queued job to running."""
         with self._connect() as db:
             cursor = db.execute(
                 """
@@ -122,9 +129,7 @@ class RunRepository:
 
     def get(self, run_id: str) -> dict[str, Any] | None:
         with self._connect() as db:
-            row = db.execute(
-                "SELECT * FROM runs WHERE run_id = ?", (run_id,)
-            ).fetchone()
+            row = db.execute("SELECT * FROM runs WHERE run_id = ?", (run_id,)).fetchone()
         return self._decode(row) if row else None
 
     def list(self, *, limit: int = 100) -> list[dict[str, Any]]:
@@ -145,13 +150,8 @@ class RunRepository:
     @staticmethod
     def _decode(row: sqlite3.Row) -> dict[str, Any]:
         result = dict(row)
-        for field in (
-            "uploads_json",
-            "options_json",
-            "results_json",
-            "summary_json",
-            "reports_json",
-            "validation_errors_json",
-        ):
+        for field in ("uploads_json", "options_json", "cases_json", "summary_json", "evidence_json"):
             result[field.removesuffix("_json")] = json.loads(result.pop(field))
+        first_failure_json = result.pop("first_failure_json")
+        result["first_failure"] = json.loads(first_failure_json) if first_failure_json else None
         return result

@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}任务列表 · MTP 测试平台{% endblock %}
 {% block content %}
+{% set status_labels = {'queued': '排队中', 'running': '执行中', 'passed': '成功', 'failed': '失败', 'error': '错误', 'cancelled': '已取消'} %}
 <div class="page-heading">
   <div><h1>测试任务</h1><p class="muted">上传测试用例后由后台执行，刷新页面不会丢失历史记录。</p></div>
   <a class="button" href="/runs/new">新建任务</a>
@@ -12,7 +13,7 @@
       {% for run in runs %}
       <tr>
         <td><code>{{ run.run_id }}</code></td>
-        <td><span class="status status-{{ run.status }}">{{ run.status }}</span></td>
+        <td><span class="status status-{{ run.status }}">{{ status_labels.get(run.status, run.status) }}</span></td>
         <td>{{ run.cases_done }}/{{ run.cases_total }}</td>
         <td>{{ run.created_at }}</td>
         <td><a href="/runs/{{ run.run_id }}">查看</a></td>

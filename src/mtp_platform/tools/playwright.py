@@ -115,10 +115,6 @@ class PlaywrightTool(BaseTool):
             pass
         self._pw = self._browser = self._context = self._page = None
 
-    def health(self) -> bool:
-        """playwright 可导入即算健康（不主动起浏览器）。"""
-        return sync_playwright is not None
-
     # -- 执行 ---------------------------------------------------------------
     def do_execute(self, action: str, args: dict[str, Any], context: StepContext) -> ActionResult:
         args = self._normalize(args)

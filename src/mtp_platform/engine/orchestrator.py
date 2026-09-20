@@ -48,44 +48,6 @@ from mtp_contracts.variables import LazySecrets, resolve
 PHASE_ORDER = ("fixtures", "preconditions", "steps")
 
 
-class _RunHandle:
-    """一次 submit 的句柄：状态可查、可取消。"""
-
-    def __init__(self, run_id: str, cases: list[Path]) -> None:
-        self.run_id = run_id
-        self.cases = cases
-        self.state = RunState.QUEUED
-        self.cancel_event = threading.Event()
-        self.results: list[CaseResult] = []
-        self.started_at = ""
-        self.finished_at = ""
-        self.error: str | None = None
-
-    def to_dict(self, *, include_results: bool = True) -> dict[str, Any]:
-        passed = sum(1 for r in self.results if r.status == RunState.PASSED)
-        failed = sum(1 for r in self.results if r.status == RunState.FAILED)
-        errored = sum(1 for r in self.results if r.status == RunState.ERROR)
-        cancelled = sum(1 for r in self.results if r.status == RunState.CANCELLED)
-        payload: dict[str, Any] = {
-            "run_id": self.run_id,
-            "state": self.state.value,
-            "cases_total": len(self.cases),
-            "cases_done": len(self.results),
-            "summary": {
-                "passed": passed,
-                "failed": failed,
-                "error": errored,
-                "cancelled": cancelled,
-            },
-            "started_at": self.started_at,
-            "finished_at": self.finished_at,
-            "error": self.error,
-        }
-        if include_results:
-            payload["results"] = [r.to_dict() for r in self.results]
-        return payload
-
-
 class TestRunner:
     def __init__(
         self,
@@ -96,7 +58,6 @@ class TestRunner:
         artifacts_root: str | Path | None = None,
         step_timeout_grace_sec: float = 1.0,
         max_workers: int = 4,
-        audit: Any = None,
     ) -> None:
         if registry is None:
             raise ConfigError(
@@ -105,12 +66,9 @@ class TestRunner:
         self.config = config
         self.registry = registry
         self.allow_write = allow_write
-        self.audit = audit
         self.artifacts_root = Path(artifacts_root or config.artifact_root())
         self.step_timeout_grace_sec = step_timeout_grace_sec
         self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="mtp-step")
-        self._runs: dict[str, _RunHandle] = {}
-        self._lock = threading.Lock()
 
     # ------------------------------------------------------------------
     # 生命周期
@@ -126,68 +84,6 @@ class TestRunner:
         self.close()
 
     # ------------------------------------------------------------------
-    # 提交 / 查询 / 取消
-    # ------------------------------------------------------------------
-    def submit(self, case_paths: list[str | Path]) -> str:
-        paths = [Path(p) for p in case_paths]
-        run_id = new_run_id()
-        handle = _RunHandle(run_id, paths)
-        with self._lock:
-            self._runs[run_id] = handle
-        threading.Thread(
-            target=self._execute_batch, args=(handle,), name=f"mtp-run-{run_id}", daemon=True
-        ).start()
-        return run_id
-
-    def get_run(self, run_id: str) -> dict[str, Any]:
-        handle = self._runs.get(run_id)
-        if handle is None:
-            raise ConfigError(f"未知 run_id: {run_id}", detail="用 list_runs() 查看已知任务")
-        return handle.to_dict()
-
-    def list_runs(self) -> list[dict[str, Any]]:
-        return [h.to_dict(include_results=False) for h in self._runs.values()]
-
-    def cancel(self, run_id: str) -> bool:
-        handle = self._runs.get(run_id)
-        if handle is None or handle.state.terminal:
-            return False
-        handle.cancel_event.set()
-        return True
-
-    def _execute_batch(self, handle: _RunHandle) -> None:
-        handle.state = RunState.RUNNING
-        handle.started_at = now_iso()
-        try:
-            for path in handle.cases:
-                if handle.cancel_event.is_set():
-                    break
-                result = self.run_case_file(path, run_id=handle.run_id, handle=handle)
-                handle.results.append(result)
-        except Exception as exc:  # noqa: BLE001 - 后台线程兜底
-            handle.error = f"{type(exc).__name__}: {exc}"
-            handle.state = RunState.ERROR
-        finally:
-            if handle.state != RunState.ERROR:
-                handle.state = self._aggregate_state(handle)
-            handle.finished_at = now_iso()
-
-    @staticmethod
-    def _aggregate_state(handle: _RunHandle) -> RunState:
-        if handle.cancel_event.is_set():
-            return RunState.CANCELLED
-        states = {r.status for r in handle.results}
-        if not states:
-            return RunState.CANCELLED
-        if RunState.ERROR in states:
-            return RunState.ERROR
-        if RunState.FAILED in states:
-            return RunState.FAILED
-        if states == {RunState.PASSED}:
-            return RunState.PASSED
-        return RunState.CANCELLED
-
-    # ------------------------------------------------------------------
     # 单用例执行
     # ------------------------------------------------------------------
     def run_case_file(
@@ -195,15 +91,13 @@ class TestRunner:
         path: str | Path,
         *,
         run_id: str | None = None,
-        handle: _RunHandle | None = None,
         cancel_event: threading.Event | None = None,
     ) -> CaseResult:
         rid = run_id or new_run_id()
-        active_cancel_event = handle.cancel_event if handle else (cancel_event or threading.Event())
+        active_cancel_event = cancel_event or threading.Event()
         store = EvidenceStore(
             self.artifacts_root,
             rid,
-            inline_max_bytes=int(self.config.evidence.get("inline_max_bytes", 8192)),
             redact_keys=self.config.redact_keys(),
             placeholder=self.config.redact_placeholder(),
         )
@@ -258,12 +152,7 @@ class TestRunner:
                 self._run_phase(phase, steps, context, result, store, cancel_event, case, run_id, acquired)
 
                 if phase == "fixtures":
-                    # 已写入的数据登记台账：进程被杀/任务被取消后仍能补清理
                     result.warnings.extend(self._audit_fixtures(case))
-                    try:
-                        self._record_fixtures(run_id, case, result.steps)
-                    except Exception as exc:  # noqa: BLE001 - 台账失败不该影响用例
-                        result.warnings.append(f"清理台账写入失败: {exc}")
 
             if not cancel_event.is_set():
                 assertions = list(case.get("assertions") or [])
@@ -346,17 +235,12 @@ class TestRunner:
 
     def _audit_fixtures(self, case: dict[str, Any]) -> list[str]:
         """fixture 体检结果转成用例告警（不阻断执行）。"""
-        from .data_manager import DataManager
+        from .data_manager import FixturePlanner
 
         try:
-            return DataManager(self.config).audit(case)
+            return FixturePlanner().issues(case)
         except Exception:  # noqa: BLE001 - 体检本身不该影响执行
             return []
-
-    def _record_fixtures(self, run_id: str, case: dict[str, Any], steps: list[StepResult]) -> None:
-        from .data_manager import DataManager
-
-        DataManager(self.config).record_applied(run_id, case, steps)
 
     def _run_phase(
         self,
@@ -481,29 +365,6 @@ class TestRunner:
             outcome = self._call_adapter(adapter_name, act, args, step_ctx, timeout_sec, record)
             record.data = dict(outcome.data)
             record.summary = outcome.summary
-
-            # 审计：每次工具调用都留痕（操作者/时间/环境在 AuditLog 里补齐）
-            if self.audit is not None:
-                try:
-                    self.audit.tool_call(
-                        run_id=run_id,
-                        case_id=str(case.get("id", "")),
-                        step_id=step_id,
-                        adapter=adapter_name,
-                        action=act,
-                        ok=outcome.ok,
-                        duration_ms=int((time.monotonic() - started) * 1000),
-                    )
-                    if not outcome.ok and outcome.error is not None and outcome.error.code == "policy_denied":
-                        self.audit.policy_denied(
-                            run_id=run_id,
-                            case_id=str(case.get("id", "")),
-                            step_id=step_id,
-                            code=outcome.error.code,
-                            message=outcome.error.message,
-                        )
-                except Exception:  # noqa: BLE001 - 审计失败不影响用例
-                    pass
 
             if outcome.ok:
                 record.status = StepStatus.PASSED

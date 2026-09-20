@@ -521,6 +521,3 @@ class ApiTool(BaseTool):
     def _summarize(method: str, url: str, status: int, duration_ms: int) -> str:
         # 摘要里只有方法、URL、状态码、耗时——不含 header / body
         return f"{method} {url} -> {status}（{duration_ms}ms）"
-
-    def health(self) -> bool:
-        return requests is not None

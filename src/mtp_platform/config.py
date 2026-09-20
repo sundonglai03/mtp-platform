@@ -57,8 +57,7 @@ def _expand_env(value: Any, missing: set[str]) -> Any:
     """递归展开字符串里的 `${VAR}` / `${VAR:-默认值}`。
 
     未设置且没有默认值的变量**不报错**，而是留空并记进 `missing`：
-    加载阶段硬失败会连 `validate` 这类不需要外部工具的命令一起挡住，
-    而「某个路径没配」是能在 doctor 里说清楚的事，不是致命错误。
+    加载阶段不提前阻断服务；任务创建或执行时会把实际配置问题返回页面/API。
     """
     if isinstance(value, dict):
         return {k: _expand_env(v, missing) for k, v in value.items()}

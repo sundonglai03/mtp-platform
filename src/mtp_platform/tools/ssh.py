@@ -248,9 +248,4 @@ class SshTool(BaseTool):
             elif child.is_file():
                 sftp.put(str(child), target)
 
-    def health(self) -> bool:
-        """paramiko 可用即算健康（不主动建连）。"""
-        return paramiko is not None
-
-
 __all__ = ["SshTool", "normalize_host"]

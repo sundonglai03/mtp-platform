@@ -67,9 +67,6 @@ class RecordingAdapter:
         self.pre_execute(action, args, context)
         return self.do_execute(action, args, context)
 
-    def health(self):
-        return True
-
     def close(self):
         self.closed = True
 
@@ -355,42 +352,6 @@ def test_cancel_between_steps(config):
 
     assert result.status == RunState.CANCELLED
     assert result.steps[1].status == StepStatus.CANCELLED
-
-
-# ---------------------------------------------------------------------------
-# 提交 / 查询 / 取消 API
-# ---------------------------------------------------------------------------
-def test_submit_and_query_run(config):
-    from mtp_platform.engine.orchestrator import TestRunner
-
-    registry = FakeRegistry(config)
-    registry.register("recorder", RecordingAdapter())
-    runner = TestRunner(config, registry=registry, artifacts_root=ARTIFACTS)
-    try:
-        run_id = runner.submit([])
-        assert run_id
-        deadline = time.time() + 5
-        while time.time() < deadline:
-            info = runner.get_run(run_id)
-            if info["state"] in {"passed", "failed", "error", "cancelled"}:
-                break
-            time.sleep(0.05)
-        assert info["state"] == "cancelled"  # 空批次 => 无结果 => 视为取消
-        assert runner.list_runs()
-        assert runner.cancel(run_id) is False  # 已完成
-    finally:
-        runner.close()
-
-
-def test_unknown_run_id_raises(config):
-    from mtp_platform.engine.orchestrator import TestRunner
-
-    runner = TestRunner(config, registry=FakeRegistry(config), artifacts_root=ARTIFACTS)
-    try:
-        with pytest.raises(Exception):
-            runner.get_run("does-not-exist")
-    finally:
-        runner.close()
 
 
 # ---------------------------------------------------------------------------

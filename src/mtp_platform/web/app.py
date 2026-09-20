@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import secrets
 import shutil
+import json
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any
@@ -23,7 +24,7 @@ from fastapi import (
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from mtp_contracts.case_validator import load_case, validate_file
+from mtp_contracts.case_validator import validate_case
 from mtp_contracts.results import new_run_id
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -33,7 +34,7 @@ from mtp_platform.service.repository import RunRepository
 
 WEB_ROOT = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(WEB_ROOT / "templates"))
-ALLOWED_SUFFIXES = {".yaml", ".yml", ".json"}
+SUITE_FILENAME = "test-suite.json"
 
 
 def _positive_int(name: str, default: int) -> int:
@@ -79,34 +80,111 @@ def _safe_child(root: Path, relative: str) -> Path:
     return candidate
 
 
-def _public_run(run: dict[str, Any], artifacts_root: Path) -> dict[str, Any]:
-    result = dict(run)
-    result["uploads"] = [Path(path).name for path in run["uploads"]]
-    result["results"] = [dict(item) for item in run["results"]]
-    for item in result["results"]:
-        if item.get("source"):
-            item["source"] = Path(str(item["source"])).name
-    result["report_urls"] = {
-        kind: f"/api/runs/{run['run_id']}/reports/{filename}"
-        for kind, filename in run["reports"].items()
+def _suite_error(
+    *,
+    case_index: int | None,
+    case_id: str | None,
+    path: str,
+    code: str,
+    message: str,
+) -> dict[str, Any]:
+    return {
+        "case_index": case_index,
+        "case_id": case_id,
+        "path": path,
+        "code": code,
+        "message": message,
     }
-    run_root = artifacts_root / "runs" / run["run_id"]
-    evidence: list[dict[str, str]] = []
-    if run_root.exists():
-        for path in sorted(run_root.rglob("*")):
-            if not path.is_file():
-                continue
-            relative = path.relative_to(run_root)
-            if relative.parts[0] in {"reports", "_audit"}:
-                continue
-            evidence.append(
-                {
-                    "path": relative.as_posix(),
-                    "url": f"/api/runs/{run['run_id']}/evidence/{relative.as_posix()}",
-                }
+
+
+def _validate_suite(payload: Any) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Validate one JSON suite before a background task is created."""
+    if not isinstance(payload, dict):
+        return [], [
+            _suite_error(
+                case_index=None,
+                case_id=None,
+                path="",
+                code="invalid_suite_type",
+                message="测试套件根节点必须是 JSON 对象",
             )
-    result["evidence"] = evidence
-    return result
+        ]
+    cases = payload.get("cases")
+    if not isinstance(cases, list) or not cases:
+        return [], [
+            _suite_error(
+                case_index=None,
+                case_id=None,
+                path="cases",
+                code="required",
+                message="cases 必填且不能为空",
+            )
+        ]
+
+    errors: list[dict[str, Any]] = []
+    valid_cases: list[dict[str, Any]] = []
+    seen_ids: dict[str, int] = {}
+    for index, case in enumerate(cases):
+        if not isinstance(case, dict):
+            errors.append(
+                _suite_error(
+                    case_index=index,
+                    case_id=None,
+                    path="",
+                    code="invalid_case_type",
+                    message="用例必须是 JSON 对象",
+                )
+            )
+            continue
+        case_id = case.get("id") if isinstance(case.get("id"), str) else None
+        for issue in validate_case(case).issues:
+            errors.append(
+                _suite_error(
+                    case_index=index,
+                    case_id=case_id,
+                    path=issue.path,
+                    code=issue.kind,
+                    message=issue.message,
+                )
+            )
+        if case_id is not None:
+            if case_id in seen_ids:
+                errors.append(
+                    _suite_error(
+                        case_index=index,
+                        case_id=case_id,
+                        path="id",
+                        code="duplicate_id",
+                        message=f"用例 id 与 cases[{seen_ids[case_id]}] 重复",
+                    )
+                )
+            else:
+                seen_ids[case_id] = index
+        valid_cases.append(case)
+    return valid_cases, errors
+
+
+def _public_run(run: dict[str, Any]) -> dict[str, Any]:
+    evidence = [
+        {
+            **item,
+            "url": f"/api/runs/{run['run_id']}/evidence/{item['path']}",
+        }
+        for item in run["evidence"]
+    ]
+    return {
+        "run_id": run["run_id"],
+        "status": run["status"],
+        "created_at": run["created_at"],
+        "started_at": run["started_at"],
+        "finished_at": run["finished_at"],
+        "cases_total": run["cases_total"],
+        "cases_done": run["cases_done"],
+        "summary": run["summary"],
+        "first_failure": run["first_failure"],
+        "cases": run["cases"],
+        "evidence": evidence,
+    }
 
 
 def create_app(*, config_path: str | None = None) -> FastAPI:
@@ -118,18 +196,32 @@ def create_app(*, config_path: str | None = None) -> FastAPI:
             "启动 Web 服务前必须设置 MTP_WEB_USERNAME、MTP_WEB_PASSWORD、MTP_SESSION_SECRET"
         )
 
-    config = load_config(config_path)
-    artifacts_root = config.artifact_root().resolve()
+    config_errors: list[str] = []
+    try:
+        config = load_config(config_path)
+        artifacts_root = config.artifact_root().resolve()
+    except Exception as exc:  # noqa: BLE001 - expose deployment errors through HTTP
+        config_errors.append(f"{type(exc).__name__}: {exc}")
+        artifacts_root = Path(os.environ.get("MTP_ARTIFACT_ROOT", "artifacts")).resolve()
+    try:
+        max_workers = _positive_int("MTP_MAX_CONCURRENT_RUNS", 1)
+    except RuntimeError as exc:
+        config_errors.append(str(exc))
+        max_workers = 1
+    try:
+        max_upload_bytes = _positive_int("MTP_MAX_UPLOAD_BYTES", 2 * 1024 * 1024)
+    except RuntimeError as exc:
+        config_errors.append(str(exc))
+        max_upload_bytes = 2 * 1024 * 1024
+    config_error = "; ".join(config_errors) or None
     artifacts_root.mkdir(parents=True, exist_ok=True)
     repository = RunRepository(artifacts_root / "mtp-platform.sqlite3")
     manager = JobManager(
         repository=repository,
         artifacts_root=artifacts_root,
         config_path=config_path,
-        max_workers=_positive_int("MTP_MAX_CONCURRENT_RUNS", 1),
+        max_workers=max_workers,
     )
-    max_upload_bytes = _positive_int("MTP_MAX_UPLOAD_BYTES", 2 * 1024 * 1024)
-    max_upload_files = _positive_int("MTP_MAX_UPLOAD_FILES", 20)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -160,10 +252,7 @@ def create_app(*, config_path: str | None = None) -> FastAPI:
     app.state.repository = repository
     app.state.job_manager = manager
     app.state.artifacts_root = artifacts_root
-
-    @app.get("/healthz")
-    def healthz() -> dict[str, str]:
-        return {"status": "ok"}
+    app.state.config_error = config_error
 
     @app.get("/login", response_class=HTMLResponse)
     def login_page(request: Request):
@@ -240,7 +329,7 @@ def create_app(*, config_path: str | None = None) -> FastAPI:
             request=request,
             name="run_detail.html",
             context={
-                "run": _public_run(run, artifacts_root),
+                "run": _public_run(run),
                 "csrf_token": _csrf_token(request),
                 "username": _user,
             },
@@ -248,115 +337,113 @@ def create_app(*, config_path: str | None = None) -> FastAPI:
 
     @app.get("/api/runs")
     def api_runs(_user: str = Depends(_require_user)) -> list[dict[str, Any]]:
-        return [_public_run(item, artifacts_root) for item in repository.list()]
+        return [_public_run(item) for item in repository.list()]
 
     @app.get("/api/runs/{run_id}")
     def api_run(run_id: str, _user: str = Depends(_require_user)) -> dict[str, Any]:
         run = repository.get(run_id)
         if not run:
             raise HTTPException(status_code=404, detail="任务不存在")
-        return _public_run(run, artifacts_root)
+        return _public_run(run)
 
     @app.post("/api/runs", status_code=status.HTTP_202_ACCEPTED)
     async def create_run(
         request: Request,
-        files: Annotated[list[UploadFile], File()],
+        suite: Annotated[list[UploadFile], File()],
         csrf_token: Annotated[str, Form()],
-        office: Annotated[bool, Form()] = False,
         allow_write: Annotated[bool, Form()] = False,
-        tag: Annotated[str, Form()] = "",
         _user: str = Depends(_require_user),
     ) -> dict[str, Any]:
         _verify_csrf(request, csrf_token)
-        if not files or len(files) > max_upload_files:
+        if config_error:
+            raise HTTPException(
+                status_code=503,
+                detail={"message": "服务配置无效，无法创建任务", "error": config_error},
+            )
+        if len(suite) != 1:
+            for upload in suite:
+                await upload.close()
             raise HTTPException(
                 status_code=400,
-                detail=f"一次必须上传 1 至 {max_upload_files} 个文件",
+                detail={"message": "一次必须上传一个 JSON 测试套件文件", "errors": []},
             )
-
+        upload = suite[0]
         run_id = new_run_id()
         upload_root = (artifacts_root / "uploads" / run_id).resolve()
         upload_root.mkdir(parents=True, exist_ok=False)
-        valid_paths: list[Path] = []
-        validation_errors: list[dict[str, Any]] = []
         try:
-            for index, upload in enumerate(files, start=1):
-                supplied_name = upload.filename or ""
-                original_name = Path(supplied_name).name
-                suffix = Path(original_name).suffix.lower()
-                unsafe_name = (
-                    not supplied_name
-                    or supplied_name != original_name
-                    or Path(supplied_name).is_absolute()
-                    or ".." in Path(supplied_name).parts
+            supplied_name = upload.filename or ""
+            original_name = Path(supplied_name).name
+            unsafe_name = (
+                not supplied_name
+                or supplied_name != original_name
+                or Path(supplied_name).is_absolute()
+                or ".." in Path(supplied_name).parts
+            )
+            if unsafe_name or original_name != SUITE_FILENAME:
+                raise HTTPException(
+                    status_code=422,
+                    detail={"message": "只允许上传一个 test-suite.json 文件", "errors": []},
                 )
-                if (
-                    unsafe_name
-                    or suffix not in ALLOWED_SUFFIXES
-                    or original_name.lower() == "mtp_config.yaml"
-                ):
-                    validation_errors.append(
-                        {
-                            "file": original_name,
-                            "messages": ["只允许上传测试用例 YAML/YML/JSON 文件"],
-                        }
-                    )
-                    continue
-                target = upload_root / f"case-{index:03d}{suffix}"
-                size = 0
-                with target.open("xb") as output:
-                    while chunk := await upload.read(64 * 1024):
-                        size += len(chunk)
-                        if size > max_upload_bytes:
-                            raise HTTPException(
-                                status_code=413,
-                                detail=f"文件 {original_name} 超过 {max_upload_bytes} 字节",
+
+            target = upload_root / "suite.json"
+            size = 0
+            with target.open("xb") as output:
+                while chunk := await upload.read(64 * 1024):
+                    size += len(chunk)
+                    if size > max_upload_bytes:
+                        raise HTTPException(
+                            status_code=413,
+                            detail=f"测试套件超过 {max_upload_bytes} 字节",
+                        )
+                    output.write(chunk)
+            try:
+                payload = json.loads(target.read_text(encoding="utf-8"))
+            except json.JSONDecodeError as exc:
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "message": "测试套件不是合法 JSON",
+                        "errors": [
+                            _suite_error(
+                                case_index=None,
+                                case_id=None,
+                                path="",
+                                code="invalid_json",
+                                message=str(exc),
                             )
-                        output.write(chunk)
-                validation = validate_file(target)
-                messages = validation.messages()
-                if not validation.ok:
-                    target.unlink(missing_ok=True)
-                    validation_errors.append(
-                        {"file": original_name, "messages": messages}
-                    )
-                    continue
-                if tag and tag not in (load_case(target).get("tags") or []):
-                    target.unlink(missing_ok=True)
-                    validation_errors.append(
-                        {"file": original_name, "messages": [f"不包含标签 {tag}"]}
-                    )
-                    continue
-                valid_paths.append(target)
+                        ],
+                    },
+                ) from exc
+            cases, validation_errors = _validate_suite(payload)
+            if validation_errors:
+                raise HTTPException(
+                    status_code=422,
+                    detail={"message": "测试套件校验失败", "errors": validation_errors},
+                )
+            valid_paths: list[Path] = []
+            for index, case in enumerate(cases, start=1):
+                case_path = upload_root / f"case-{index:03d}.json"
+                case_path.write_text(
+                    json.dumps(case, ensure_ascii=False, separators=(",", ":")),
+                    encoding="utf-8",
+                )
+                valid_paths.append(case_path)
         except Exception:
             shutil.rmtree(upload_root, ignore_errors=True)
             raise
         finally:
-            for upload in files:
-                await upload.close()
+            await upload.close()
 
-        if not valid_paths:
-            shutil.rmtree(upload_root, ignore_errors=True)
-            raise HTTPException(
-                status_code=422,
-                detail={
-                    "message": "没有可执行的合法用例",
-                    "validation_errors": validation_errors,
-                },
-            )
-
-        options = {"office": office, "allow_write": allow_write, "tag": tag}
         manager.submit(
             run_id=run_id,
             uploads=valid_paths,
-            options=options,
-            validation_errors=validation_errors,
+            allow_write=allow_write,
         )
         return {
             "run_id": run_id,
             "status": "queued",
             "url": f"/runs/{run_id}",
-            "validation_errors": validation_errors,
         }
 
     @app.post("/api/runs/{run_id}/cancel")
@@ -374,30 +461,21 @@ def create_app(*, config_path: str | None = None) -> FastAPI:
             raise HTTPException(status_code=409, detail="任务已经结束，无法取消")
         return {"run_id": run_id, "cancel_requested": True}
 
-    @app.get("/api/runs/{run_id}/reports/{filename}")
-    def download_report(
-        run_id: str, filename: str, _user: str = Depends(_require_user)
-    ):
-        run = repository.get(run_id)
-        if not run or filename not in set(run["reports"].values()):
-            raise HTTPException(status_code=404, detail="报告不存在")
-        target = _safe_child(artifacts_root / "runs" / run_id / "reports", filename)
-        if not target.is_file():
-            raise HTTPException(status_code=404, detail="报告不存在")
-        return FileResponse(target, filename=target.name)
-
     @app.get("/api/runs/{run_id}/evidence/{evidence_path:path}")
     def download_evidence(
         run_id: str, evidence_path: str, _user: str = Depends(_require_user)
     ):
-        if not repository.get(run_id):
+        run = repository.get(run_id)
+        if not run:
             raise HTTPException(status_code=404, detail="任务不存在")
+        entry = next((item for item in run["evidence"] if item["path"] == evidence_path), None)
+        if not entry:
+            raise HTTPException(status_code=404, detail="证据不存在")
         run_root = artifacts_root / "runs" / run_id
         target = _safe_child(run_root, evidence_path)
-        relative = target.relative_to(run_root.resolve())
-        if relative.parts[0] in {"reports", "_audit"} or not target.is_file():
+        if not target.is_file():
             raise HTTPException(status_code=404, detail="证据不存在")
-        return FileResponse(target, filename=target.name)
+        return FileResponse(target, filename=target.name, media_type=entry["mime_type"])
 
     @app.exception_handler(401)
     async def unauthorized(request: Request, exc: HTTPException):

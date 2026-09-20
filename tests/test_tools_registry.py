@@ -21,9 +21,6 @@ class _StubTool:
     def execute(self, action, args, context):
         return ActionResult.success(action, adapter=self.name)
 
-    def health(self) -> bool:
-        return True
-
     def close(self) -> None:
         self.closed = True
 
@@ -51,10 +48,3 @@ def test_register_overrides_and_lifecycle(config):
 
     registry.close_all()
     assert stub.closed is True
-
-
-def test_health_reports_available_tools(config):
-    registry = ToolRegistry(config)
-    report = registry.health()
-    assert "api" in report
-    registry.close_all()

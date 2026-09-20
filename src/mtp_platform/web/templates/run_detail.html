@@ -1,24 +1,23 @@
 {% extends "base.html" %}
 {% block title %}{{ run.run_id }} · MTP 测试平台{% endblock %}
 {% block content %}
+{% set status_labels = {'queued': '排队中', 'running': '执行中', 'passed': '成功', 'failed': '失败', 'error': '错误', 'cancelled': '已取消'} %}
 <div id="run-detail" data-run-id="{{ run.run_id }}">
   <div class="page-heading">
     <div><h1>任务详情</h1><code>{{ run.run_id }}</code></div>
     <button id="cancel-run" class="danger-button" {% if run.status in ['passed', 'failed', 'error', 'cancelled'] %}disabled{% endif %}>取消任务</button>
   </div>
   <section class="metrics">
-    <div class="card"><span>状态</span><strong id="run-status" class="status status-{{ run.status }}">{{ run.status }}</strong></div>
+    <div class="card"><span>状态</span><strong id="run-status" class="status status-{{ run.status }}">{{ status_labels.get(run.status, run.status) }}</strong></div>
     <div class="card"><span>进度</span><strong id="run-progress">{{ run.cases_done }}/{{ run.cases_total }}</strong></div>
     <div class="card"><span>开始</span><strong id="run-started">{{ run.started_at or '-' }}</strong></div>
     <div class="card"><span>结束</span><strong id="run-finished">{{ run.finished_at or '-' }}</strong></div>
+    <div class="card"><span>耗时</span><strong id="run-duration">-</strong></div>
   </section>
   <section class="card">
     <h2>用例结果</h2>
-    <div id="run-error" class="alert error {% if not run.error %}hidden{% endif %}">{{ run.error or '' }}</div>
+    <div id="run-error" class="alert error {% if not run.first_failure %}hidden{% endif %}">{{ run.first_failure.message if run.first_failure else '' }}</div>
     <div id="case-results"></div>
-  </section>
-  <section class="card">
-    <h2>报告</h2><div id="report-links" class="links"></div>
   </section>
   <section class="card">
     <h2>证据</h2><div id="evidence-links" class="links"></div>

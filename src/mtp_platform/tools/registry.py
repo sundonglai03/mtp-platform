@@ -1,8 +1,4 @@
-"""工具注册表：装配直连工具，并实现 engine 的 `ports.ToolRegistry` 协议。
-
-engine 只看到 `get` / `is_active` / `close_all`；这里的 `health` / `available` 供
-platform 的 doctor 与 CLI 使用。
-"""
+"""工具注册表：装配直连工具，并实现 engine 的 `ports.ToolRegistry` 协议。"""
 
 from __future__ import annotations
 
@@ -24,7 +20,6 @@ def _default_builders() -> dict[str, Callable[[PlatformConfig], BaseTool]]:
         "ssh": SshTool,
         "mysql": MysqlTool,
         "playwright": PlaywrightTool,
-        # 随后补：office
     }
 
 
@@ -63,16 +58,6 @@ class ToolRegistry:
         instance = builders[name](self.config)
         self._instances[name] = instance
         return instance
-
-    # -- 生命周期 ---------------------------------------------------------
-    def health(self) -> dict[str, bool | str]:
-        report: dict[str, bool | str] = {}
-        for name in self.available():
-            try:
-                report[name] = bool(self.get(name).health())
-            except Exception as exc:  # noqa: BLE001 - 诊断场景，不抛出
-                report[name] = f"unavailable: {type(exc).__name__}: {exc}"
-        return report
 
     def close_all(self) -> None:
         """释放所有工具持有的连接/进程。

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "mtp-platform"
 version = "0.1.0"
-description = "自动化测试系统：接收规范用例，直连工具执行并生成报告"
+description = "常驻 HTTP 测试服务：接收 JSON 测试套件并执行"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -25,11 +25,7 @@ dependencies = [
 ssh = ["paramiko>=3.4"]
 mysql = ["PyMySQL>=1.1"]
 playwright = ["playwright>=1.40"]
-office = ["openpyxl>=3.1", "python-docx>=1.1"]
 dev = ["pytest>=9.0", "httpx>=0.28"]
-
-[project.scripts]
-mtp = "mtp_platform.cli:main"
 
 [tool.uv.sources]
 mtp-contracts-core = { git = "https://github.com/sundonglai03/mtp-contracts-core.git", tag = "v0.1.0" }

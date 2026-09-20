@@ -1,14 +1,12 @@
 {% extends "base.html" %}
 {% block title %}新建任务 · MTP 测试平台{% endblock %}
 {% block content %}
-<div class="page-heading"><div><h1>新建测试任务</h1><p class="muted">支持 YAML、YML、JSON，一次最多上传 20 个文件。</p></div></div>
+<div class="page-heading"><div><h1>新建测试任务</h1><p class="muted">上传唯一的 <code>test-suite.json</code>，其中必须包含非空 <code>cases</code> 数组。</p></div></div>
 <section class="card">
   <div id="form-error" class="alert error hidden"></div>
   <form id="run-form" action="/api/runs" method="post" enctype="multipart/form-data" class="stack">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <label>测试用例文件<input type="file" name="files" accept=".yaml,.yml,.json" multiple required></label>
-    <label>标签筛选（可选）<input name="tag" placeholder="例如 smoke"></label>
-    <label class="check"><input type="checkbox" name="office" value="true"> 生成 Excel 和 Word 报告</label>
+    <label>JSON 测试套件<input type="file" name="suite" accept="application/json,.json" required></label>
     <label class="check danger"><input type="checkbox" name="allow_write" value="true"> 允许 MySQL 写操作</label>
     <p class="warning">开启写操作可能修改目标数据库。仅在确认用例和目标环境安全时启用。</p>
     <button type="submit">上传并开始测试</button>

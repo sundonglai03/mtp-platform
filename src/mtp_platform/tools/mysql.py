@@ -7,7 +7,7 @@
 
 - `host` 必须在 `security.mysql_allow_hosts` 白名单内；
 - `database` 命中 `security.mysql_deny_databases` 直接拒绝；
-- 写操作需要 `context.allow_write`（由 CLI 的 `--allow-write` 显式放行）；
+- 写操作需要 `context.allow_write`（由 Web 创建任务时显式放行）；
 - 写操作**必须在事务里**执行并核对影响行数，超过 `mysql_max_affected_rows` 直接回滚；
 - `update` / `delete` **必须带 where**，否则拒绝（防止误伤全表）；
 - **凭据永远不进 summary/证据**，只以 host/database/user 形式出现。
@@ -66,7 +66,7 @@ class MysqlTool(BaseTool):
     def _credentials(self, args: dict[str, Any], context: StepContext) -> dict[str, Any]:
         creds = args.get("credentials")
         if creds is None:
-            # 允许用例从 secrets 组装，避免把密码写进 YAML
+            # 允许用例从 secrets 组装，避免把密码写进 JSON
             creds = context.secrets.get("credentials") if context.secrets else None
         if not isinstance(creds, dict):
             raise ConfigError(
@@ -115,7 +115,7 @@ class MysqlTool(BaseTool):
                 f"写操作被拒绝: {action}",
                 adapter=self.name,
                 action=action,
-                detail="需要 CLI 显式传 --allow-write（用例不能自行提权）",
+                detail="需要在 Web 创建任务时显式允许写操作（用例不能自行提权）",
             )
 
     def pre_execute(self, action: str, args: dict[str, Any], context: StepContext) -> None:
@@ -273,11 +273,6 @@ class MysqlTool(BaseTool):
             raise
 
         return {"rows_affected": affected}
-
-    def health(self) -> bool:
-        """驱动可用即算健康（不主动建连）。"""
-        return pymysql is not None
-
 
 def _where_clause(args: dict[str, Any], *, required: bool = False) -> tuple[str, list[Any]]:
     """构造 WHERE 子句。`where` 是 SQL 片段（列名部分由调用方保证），值走 `where_params`。"""

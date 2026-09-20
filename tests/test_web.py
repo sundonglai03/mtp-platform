@@ -1,5 +1,8 @@
+"""Authenticated HTTP workflow tests for minimal JSON suite tasks."""
+
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import subprocess
@@ -9,14 +12,26 @@ from pathlib import Path
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from mtp_contracts.results import CaseResult, RunState
 
-from mtp_platform.service.executor import RunOutcome
+from mtp_platform.service.executor import RunOutcome, summarize
 from mtp_platform.service.jobs import JobManager
 from mtp_platform.service.repository import RunRepository
 from mtp_platform.web.app import _safe_child, create_app
 
-VALID_CASE = Path("tests/cases/valid/api-login.yaml").read_bytes()
-INVALID_CASE = b"schema_version: 1\nid: broken\ntitle: broken\n"
+
+def _suite(*cases: dict) -> bytes:
+    return json.dumps({"cases": list(cases)}, ensure_ascii=False).encode()
+
+
+VALID_CASE = {
+    "schema_version": 1,
+    "id": "WEB-001",
+    "title": "valid web case",
+    "steps": [{"id": "snapshot", "action": "playwright.snapshot"}],
+}
+VALID_SUITE = _suite(VALID_CASE)
+INVALID_SUITE = _suite({"schema_version": 1, "id": "BROKEN-001", "title": "missing steps"})
 
 
 def _csrf(response) -> str:
@@ -34,44 +49,21 @@ def _login(client: TestClient, *, password: str = "test-password"):
     )
 
 
-def _fake_execute(_self, request, *, cancel_event=None, on_progress=None, emit=None):
-    request.output_dir.mkdir(parents=True, exist_ok=True)
-    paths = {
-        "json": request.output_dir / f"{request.run_id}-results.json",
-        "junit": request.output_dir / f"{request.run_id}-junit.xml",
-        "html": request.output_dir / f"{request.run_id}-report.html",
-        "xlsx": None,
-        "docx": None,
-    }
-    paths["json"].write_text("{}", encoding="utf-8")
-    paths["junit"].write_text("<testsuite/>", encoding="utf-8")
-    paths["html"].write_text("<html></html>", encoding="utf-8")
-    cases = [
-        {
-            "run_id": request.run_id,
-            "case_id": path.stem,
-            "title": "fake",
-            "status": "passed",
-            "duration_ms": 1,
-            "steps": [],
-            "assertions": [],
-        }
-        for path in request.case_paths
-    ]
-    payload = {
-        "run_id": request.run_id,
-        "cases": cases,
-        "summary": {
-            "cases_total": len(cases),
-            "cases_passed": len(cases),
-            "cases_failed": 0,
-            "cases_error": 0,
-            "cases_cancelled": 0,
-            "duration_ms": len(cases),
-            "success": True,
-        },
-    }
-    return RunOutcome(request.run_id, payload, paths)
+def _fake_execute(_self, request, *, cancel_event=None, on_progress=None):
+    results: list[CaseResult] = []
+    for index, path in enumerate(request.case_paths, start=1):
+        case = json.loads(path.read_text(encoding="utf-8"))
+        result = CaseResult(
+            run_id=request.run_id,
+            case_id=case["id"],
+            title=case["title"],
+            status=RunState.PASSED,
+            duration_ms=1,
+        )
+        results.append(result)
+        if on_progress:
+            on_progress(result, index, len(request.case_paths))
+    return RunOutcome(request.run_id, results, summarize(results, cancelled=False))
 
 
 @pytest.fixture()
@@ -86,53 +78,33 @@ def web_client(tmp_path, monkeypatch):
         yield client, app
 
 
-def test_login_failure_success_and_logout(web_client):
+def _post_suite(client: TestClient, *, content: bytes = VALID_SUITE, name: str = "test-suite.json"):
+    token = _csrf(client.get("/runs/new"))
+    return client.post(
+        "/api/runs",
+        files={"suite": (name, content, "application/json")},
+        data={"csrf_token": token},
+    )
+
+
+def test_login_and_csrf(web_client):
     client, _app = web_client
     assert client.get("/api/runs").status_code == 401
-    assert client.get("/docs").status_code == 404
     assert _login(client, password="wrong").status_code == 401
     assert _login(client).status_code == 303
-    page = client.get("/")
-    assert page.status_code == 200
-    token = _csrf(page)
-    response = client.post(
-        "/logout", data={"csrf_token": token}, follow_redirects=False
-    )
-    assert response.status_code == 303
-    assert client.get("/api/runs").status_code == 401
-
-
-def test_login_and_mutations_require_csrf(web_client):
-    client, _app = web_client
-    assert (
-        client.post(
-            "/login",
-            data={
-                "username": "admin",
-                "password": "test-password",
-                "csrf_token": "bad",
-            },
-        ).status_code
-        == 403
-    )
-    assert _login(client).status_code == 303
+    assert client.get("/runs/new").status_code == 200
     response = client.post(
         "/api/runs",
-        files={"files": ("case.yaml", VALID_CASE, "application/yaml")},
+        files={"suite": ("test-suite.json", VALID_SUITE)},
         data={"csrf_token": "bad"},
     )
     assert response.status_code == 403
 
 
-def test_upload_run_complete_and_download_report(web_client):
-    client, _app = web_client
+def test_one_test_suite_creates_only_minimal_sqlite_result(web_client):
+    client, app = web_client
     _login(client)
-    token = _csrf(client.get("/runs/new"))
-    response = client.post(
-        "/api/runs",
-        files={"files": ("case.yaml", VALID_CASE, "application/yaml")},
-        data={"csrf_token": token},
-    )
+    response = _post_suite(client, content=_suite(VALID_CASE, VALID_CASE | {"id": "WEB-002"}))
     assert response.status_code == 202
     run_id = response.json()["run_id"]
     for _ in range(50):
@@ -140,110 +112,85 @@ def test_upload_run_complete_and_download_report(web_client):
         if run["status"] == "passed":
             break
         time.sleep(0.01)
+    assert set(run) == {
+        "run_id", "status", "created_at", "started_at", "finished_at",
+        "cases_total", "cases_done", "summary", "first_failure", "cases", "evidence",
+    }
     assert run["status"] == "passed"
-    assert run["cases_done"] == 1
-    report_url = run["report_urls"]["html"]
-    assert client.get(report_url).status_code == 200
-
-
-def test_mixed_upload_runs_only_valid_cases(web_client):
-    client, _app = web_client
-    _login(client)
-    token = _csrf(client.get("/runs/new"))
-    files = [
-        ("files", ("valid.yaml", VALID_CASE, "application/yaml")),
-        ("files", ("invalid.yaml", INVALID_CASE, "application/yaml")),
-    ]
-    response = client.post("/api/runs", files=files, data={"csrf_token": token})
-    assert response.status_code == 202
-    assert len(response.json()["validation_errors"]) == 1
+    assert (run["cases_total"], run["cases_done"]) == (2, 2)
+    assert run["summary"] == {"passed": 2, "failed": 0, "error": 0, "cancelled": 0}
+    assert run["first_failure"] is None
+    assert all(set(case) == {"case_id", "status", "duration_ms"} for case in run["cases"])
+    assert not (app.state.artifacts_root / "runs" / run_id / "reports").exists()
+    assert not list(app.state.artifacts_root.rglob("latest"))
+    assert not list(app.state.artifacts_root.rglob("history.jsonl"))
 
 
 @pytest.mark.parametrize(
-    ("filename", "content"),
+    ("name", "content", "code"),
     [
-        ("bad.txt", VALID_CASE),
-        ("../../case.yaml", VALID_CASE),
-        ("mtp_config.yaml", VALID_CASE),
-        ("bad.yaml", INVALID_CASE),
+        ("suite.json", VALID_SUITE, None),
+        ("test-suite.json", b"not json", "invalid_json"),
+        ("test-suite.json", INVALID_SUITE, "schema"),
+        ("test-suite.json", _suite(VALID_CASE, VALID_CASE), "duplicate_id"),
     ],
 )
-def test_rejects_invalid_uploads(web_client, filename, content):
+def test_rejects_invalid_suite_as_one_request(web_client, name, content, code):
+    client, _app = web_client
+    _login(client)
+    response = _post_suite(client, name=name, content=content)
+    assert response.status_code == 422
+    if code:
+        assert response.json()["detail"]["errors"][0]["code"] == code
+
+
+def test_rejects_multiple_suite_files(web_client):
     client, _app = web_client
     _login(client)
     token = _csrf(client.get("/runs/new"))
     response = client.post(
         "/api/runs",
-        files={"files": (filename, content, "application/octet-stream")},
+        files=[("suite", ("test-suite.json", VALID_SUITE)), ("suite", ("test-suite.json", VALID_SUITE))],
         data={"csrf_token": token},
     )
-    assert response.status_code == 422
-
-
-def test_rejects_too_many_uploads(web_client):
-    client, _app = web_client
-    _login(client)
-    token = _csrf(client.get("/runs/new"))
-    files = [
-        ("files", (f"case-{index}.yaml", VALID_CASE, "application/yaml"))
-        for index in range(21)
-    ]
-    response = client.post("/api/runs", files=files, data={"csrf_token": token})
     assert response.status_code == 400
 
 
-def test_rejects_oversized_upload(tmp_path, monkeypatch):
+def test_failure_and_png_evidence_are_stored_in_sqlite_and_require_login(web_client):
+    client, app = web_client
+    run_root = app.state.artifacts_root / "runs" / "known"
+    image = run_root / "evidence" / "login" / "submit" / "failure.png"
+    image.parent.mkdir(parents=True)
+    image.write_bytes(b"\x89PNG\r\n\x1a\n")
+    app.state.repository.create(run_id="known", uploads=[], options={})
+    app.state.repository.update(
+        "known",
+        status="failed",
+        cases_done=1,
+        cases_json='[{"case_id": "login-success", "status": "failed", "duration_ms": 1234}]',
+        summary_json='{"passed": 0, "failed": 1, "error": 0, "cancelled": 0}',
+        first_failure_json='{"case_id": "login-success", "step_id": "submit-login", "message": "期望状态码 200，实际为 401"}',
+        evidence_json='[{"path": "evidence/login/submit/failure.png", "mime_type": "image/png", "size": 8}]',
+    )
+    assert client.get("/api/runs/known/evidence/evidence/login/submit/failure.png").status_code == 401
+    _login(client)
+    run = client.get("/api/runs/known").json()
+    assert run["first_failure"]["step_id"] == "submit-login"
+    evidence = client.get(run["evidence"][0]["url"])
+    assert evidence.headers["content-type"] == "image/png"
+    assert client.get("/api/runs/known/evidence/../private.png").status_code == 404
+
+
+def test_invalid_deployment_config_is_reported_when_creating_a_task(tmp_path, monkeypatch):
     monkeypatch.setenv("MTP_WEB_USERNAME", "admin")
     monkeypatch.setenv("MTP_WEB_PASSWORD", "test-password")
     monkeypatch.setenv("MTP_SESSION_SECRET", "test-session-secret-at-least-32-bytes")
     monkeypatch.setenv("MTP_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
-    monkeypatch.setenv("MTP_MAX_UPLOAD_BYTES", "10")
-    app = create_app()
+    app = create_app(config_path=str(tmp_path / "missing-config"))
     with TestClient(app) as client:
         _login(client)
-        token = _csrf(client.get("/runs/new"))
-        response = client.post(
-            "/api/runs",
-            files={"files": ("large.yaml", VALID_CASE, "application/yaml")},
-            data={"csrf_token": token},
-        )
-    assert response.status_code == 413
-
-
-def test_report_requires_login(web_client):
-    client, app = web_client
-    reports = app.state.artifacts_root / "runs" / "known" / "reports"
-    reports.mkdir(parents=True)
-    (reports / "report.html").write_text("ok", encoding="utf-8")
-    app.state.repository.create(
-        run_id="known", uploads=[], options={}, validation_errors=[]
-    )
-    app.state.repository.update(
-        "known", reports_json='{"html": "report.html"}', status="passed"
-    )
-    assert client.get("/api/runs/known/reports/report.html").status_code == 401
-
-
-def test_authenticated_evidence_download(web_client):
-    client, app = web_client
-    evidence = (
-        app.state.artifacts_root / "runs" / "evidence-run" / "evidence" / "proof.txt"
-    )
-    evidence.parent.mkdir(parents=True)
-    evidence.write_text("proof", encoding="utf-8")
-    app.state.repository.create(
-        run_id="evidence-run", uploads=[], options={}, validation_errors=[]
-    )
-    _login(client)
-    run = client.get("/api/runs/evidence-run").json()
-    assert run["evidence"][0]["path"] == "evidence/proof.txt"
-    assert client.get(run["evidence"][0]["url"]).text == "proof"
-    assert (
-        client.get(
-            "/api/runs/evidence-run/evidence/../_audit/private.jsonl"
-        ).status_code
-        == 404
-    )
+        response = _post_suite(client)
+    assert response.status_code == 503
 
 
 def test_safe_child_blocks_path_escape(tmp_path):
@@ -251,34 +198,22 @@ def test_safe_child_blocks_path_escape(tmp_path):
         _safe_child(tmp_path / "safe", "../secret")
 
 
-def test_repository_recovers_running_job(tmp_path):
+def test_repository_recovers_running_job_and_resumes_queued_json_cases(tmp_path, monkeypatch):
     repository = RunRepository(tmp_path / "runs.db")
-    repository.create(run_id="run-1", uploads=[], options={}, validation_errors=[])
-    repository.update("run-1", status="running")
+    repository.create(run_id="running", uploads=[], options={})
+    repository.update("running", status="running")
     repository.recover_interrupted()
-    recovered = repository.get("run-1")
-    assert recovered["status"] == "error"
-    assert "重启" in recovered["error"]
+    assert repository.get("running")["status"] == "error"
 
-
-def test_job_manager_resumes_queued_job(tmp_path, monkeypatch):
-    repository = RunRepository(tmp_path / "runs.db")
-    upload = tmp_path / "case.yaml"
-    upload.write_bytes(VALID_CASE)
-    repository.create(
-        run_id="queued-restart", uploads=[str(upload)], options={}, validation_errors=[]
-    )
+    upload = tmp_path / "case.json"
+    upload.write_text(json.dumps(VALID_CASE), encoding="utf-8")
+    repository.create(run_id="queued", uploads=[str(upload)], options={})
     monkeypatch.setattr("mtp_platform.service.jobs.RunExecutor.execute", _fake_execute)
-    manager = JobManager(
-        repository=repository,
-        artifacts_root=tmp_path,
-        config_path=None,
-        max_workers=1,
-    )
+    manager = JobManager(repository=repository, artifacts_root=tmp_path, config_path=None)
     manager.start()
     try:
         for _ in range(50):
-            run = repository.get("queued-restart")
+            run = repository.get("queued")
             if run["status"] == "passed":
                 break
             time.sleep(0.01)
@@ -287,29 +222,7 @@ def test_job_manager_resumes_queued_job(tmp_path, monkeypatch):
         manager.stop()
 
 
-def test_cancel_queued_and_running_jobs(tmp_path):
-    repository = RunRepository(tmp_path / "runs.db")
-    manager = JobManager(
-        repository=repository,
-        artifacts_root=tmp_path,
-        config_path=None,
-        max_workers=1,
-    )
-    repository.create(run_id="queued", uploads=[], options={}, validation_errors=[])
-    assert manager.cancel("queued") is True
-    assert repository.get("queued")["status"] == "cancelled"
-
-    repository.create(run_id="running", uploads=[], options={}, validation_errors=[])
-    repository.update("running", status="running")
-    event = __import__("threading").Event()
-    manager._active["running"] = event
-    assert manager.cancel("running") is True
-    assert event.is_set()
-
-
-@pytest.mark.skipif(
-    shutil.which("docker") is None, reason="Docker CLI is not installed"
-)
+@pytest.mark.skipif(shutil.which("docker") is None, reason="Docker CLI is not installed")
 def test_docker_compose_config_is_valid():
     result = subprocess.run(
         ["docker", "compose", "config"],
