@@ -9,11 +9,12 @@ services:
     working_dir: /app
     environment:
       MTP_ARTIFACT_ROOT: /app/artifacts
-      MTP_WEB_USERNAME: ${MTP_WEB_USERNAME:-}
-      MTP_WEB_PASSWORD: ${MTP_WEB_PASSWORD:-}
-      MTP_SESSION_SECRET: ${MTP_SESSION_SECRET:-}
+      # 仅用于内网部署；如需换密码，直接修改这里后重建容器。
+      MTP_WEB_USERNAME: admin
+      MTP_WEB_PASSWORD: "123456"
+      MTP_SESSION_SECRET: mtp-platform-internal-session-secret
       MTP_MAX_CONCURRENT_RUNS: ${MTP_MAX_CONCURRENT_RUNS:-1}
-      MTP_COOKIE_SECURE: ${MTP_COOKIE_SECURE:-false}
+      MTP_COOKIE_SECURE: "false"
     ports:
       - "${MTP_HTTP_PORT:-8080}:8080"
     volumes:

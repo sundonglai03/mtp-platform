@@ -13,27 +13,15 @@ uv run --frozen mtp validate tests/cases/valid
 uv run --frozen mtp run tests/cases/valid --out artifacts/reports
 ```
 
-本地启动 Web 服务：
-
-```bash
-export MTP_WEB_USERNAME=admin
-export MTP_WEB_PASSWORD='替换为高强度密码'
-export MTP_SESSION_SECRET="$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')"
-uv run --frozen mtp serve --host 0.0.0.0 --port 8080
-```
-
 ### Web 常驻服务（Docker）
 
 ```bash
-export MTP_WEB_USERNAME=admin
-export MTP_WEB_PASSWORD='替换为高强度密码'
-export MTP_SESSION_SECRET="$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')"
 docker compose build
 docker compose up -d
 docker compose ps
 ```
 
-打开 `http://<服务器IP>:8080`，登录后即可上传 YAML、YML 或 JSON 用例。用户名、密码和 Session 密钥没有默认生产值；缺少其中任意一个时 Web 服务会拒绝启动。
+打开 `http://<服务器IP>:8080`，登录后即可上传 YAML、YML 或 JSON 用例。内网默认账号为 `admin`，密码为 `123456`，不需要在宿主机配置环境变量。修改账号或密码时，直接编辑 `docker-compose.yaml` 的 `environment` 后重建容器。
 
 公网部署请在前面使用 Nginx/Caddy 配置 HTTPS，并设置：
 
@@ -130,9 +118,9 @@ docker build --build-arg MTP_INSTALL_BROWSER=0 -t mtp-platform:0.1.0 .
 | `MTP_ROOT` | 项目和相对路径的解析根目录 |
 | `MTP_ARTIFACT_ROOT` | 证据、下载文件、报告和历史记录目录 |
 | `PLAYWRIGHT_BROWSERS_PATH` | 共享 Playwright 浏览器内核目录 |
-| `MTP_WEB_USERNAME` | Web 登录用户名，启动 Web 服务时必填 |
-| `MTP_WEB_PASSWORD` | Web 登录密码，启动 Web 服务时必填 |
-| `MTP_SESSION_SECRET` | Session 签名密钥，启动 Web 服务时必填 |
+| `MTP_WEB_USERNAME` | Web 登录用户名，Compose 内网默认值为 `admin` |
+| `MTP_WEB_PASSWORD` | Web 登录密码，Compose 内网默认值为 `123456` |
+| `MTP_SESSION_SECRET` | Session 签名密钥，Compose 已提供内网固定值 |
 | `MTP_HTTP_PORT` | Compose 对外端口，默认 `8080` |
 | `MTP_MAX_CONCURRENT_RUNS` | 后台任务并发数，默认 `1` |
 | `MTP_MAX_UPLOAD_BYTES` | 单文件上限，默认 `2097152`（2 MiB） |
