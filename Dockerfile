@@ -9,20 +9,20 @@ RUN pip install --no-cache-dir "uv==$UV_VERSION"
 WORKDIR /app
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
-    PYTHONUNBUFFERED=1 \
-    UV_CACHE_DIR=/app/.cache/uv
+    PYTHONUNBUFFERED=1
 
 # 先装依赖（利用层缓存）。
 # 显式把 ssh / mysql / playwright 三个运行能力带上 ——
 # 不装的话，容器里这些工具会在运行时才报「依赖缺失」。
 # 想压镜像可以改成：--extra ssh --extra mysql（按需裁剪）。
 #
-# 依赖缓存挂在当前目录下的 /app/.cache/uv（路径由 UV_CACHE_DIR 指定，mount 目标一致）：
-# 依赖层因为 uv.lock 变更 / 换构建机 / 清过层缓存而重建时，wheel 直接从本地缓存
-# 取，不再回 PyPI 下载；`mtp-contracts-core` 的 git 依赖也一并缓存在这里，
-# 不用每次重新 clone GitHub。首次构建照常联网。
+# --mount=type=cache 把 uv 的下载缓存挂到宿主机的构建缓存上（默认路径就是
+# /root/.cache/uv，跟随约定不自定义）：依赖层因为 uv.lock 变更 / 换构建机 /
+# 清过层缓存而重建时，wheel 直接从缓存取，不再回 PyPI 下载；mtp-contracts-core
+# 的 git 依赖也一并缓存在这里，不用每次重新 clone GitHub。缓存不进镜像层，
+# 首次构建照常联网。
 COPY pyproject.toml uv.lock README.md ./
-RUN --mount=type=cache,target=/app/.cache/uv \
+RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --no-dev --frozen \
     --extra ssh --extra mysql --extra playwright \
     --no-install-project
@@ -45,7 +45,7 @@ RUN if [ "$MTP_INSTALL_BROWSER" = "1" ]; then \
 # 再装本包源码
 COPY src ./src
 COPY mtp_config.yaml ./mtp_config.yaml
-RUN --mount=type=cache,target=/app/.cache/uv \
+RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --no-dev --frozen \
     --extra ssh --extra mysql --extra playwright
 
