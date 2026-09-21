@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from pathlib import Path
 
@@ -68,6 +69,61 @@ class RecordingAdapter:
         return self.do_execute(action, args, context)
 
     def close(self):
+        self.closed = True
+
+
+class ThreadBoundPlaywrightAdapter:
+    """模拟 Playwright：任何跨线程调用都会像 sync API 一样失败。"""
+
+    name = "playwright"
+
+    def __init__(self) -> None:
+        self.owner_thread: int | None = None
+        self.actions_seen: list[str] = []
+        self.violations: list[tuple[int, int]] = []
+        self.closed = False
+
+    def _check_thread(self) -> None:
+        current = threading.get_ident()
+        if self.owner_thread is None:
+            self.owner_thread = current
+        elif current != self.owner_thread:
+            self.violations.append((self.owner_thread, current))
+            raise RuntimeError("Cannot switch to a different thread")
+
+    def actions(self):
+        return {
+            "navigate": "navigate",
+            "click": "click",
+            "screenshot": "screenshot",
+            "snapshot": "snapshot",
+            "evaluate": "evaluate",
+        }
+
+    def execute(self, action, args, context):
+        return self.do_execute(action, args, context)
+
+    def do_execute(self, action, args, context):
+        self._check_thread()
+        self.actions_seen.append(action)
+        if action == "click":
+            return ActionResult.failure(
+                action,
+                PolicyDeniedError("mock click failure", adapter=self.name, action=action),
+                adapter=self.name,
+            )
+        if action == "snapshot":
+            data = {"page_text": "页面正常", "text": "页面正常"}
+        elif action == "evaluate":
+            data = {"json": {"visible": True}}
+        else:
+            data = {}
+        return ActionResult.success(action, adapter=self.name, data=data, summary="ok")
+
+    def close(self):
+        if self.closed:
+            return
+        self._check_thread()
         self.closed = True
 
 
@@ -139,6 +195,42 @@ def test_successful_case_passes(config):
     assert result.steps[0].attempts == 1
     assert result.steps[0].started_at and result.steps[0].finished_at
     assert result.steps[0].duration_ms >= 0
+
+
+def test_playwright_steps_evidence_probes_and_close_stay_on_one_thread(config):
+    adapter = ThreadBoundPlaywrightAdapter()
+    case = case_with(
+        steps=[
+            {
+                "id": "open",
+                "action": "playwright.navigate",
+                "args": {"url": "http://127.0.0.1/"},
+                "evidence": ["screenshot", "snapshot"],
+            },
+            {
+                "id": "click",
+                "action": "playwright.click",
+                "args": {"target": "#missing"},
+            },
+        ],
+        assertions=[
+            {
+                "id": "visible",
+                "type": "element_visible",
+                "args": {"target": "#status"},
+            }
+        ],
+    )
+
+    result = run(config, {"playwright": adapter}, case)
+
+    assert result.status == RunState.FAILED
+    assert adapter.violations == []
+    assert adapter.closed is True
+    assert adapter.owner_thread is not None
+    assert adapter.actions_seen.count("screenshot") == 2
+    assert adapter.actions_seen.count("snapshot") == 2
+    assert "evaluate" in adapter.actions_seen
 
 
 def test_failed_assertion_marks_case_failed(config):

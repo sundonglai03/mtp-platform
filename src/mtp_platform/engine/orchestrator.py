@@ -69,13 +69,40 @@ class TestRunner:
         self.artifacts_root = Path(artifacts_root or config.artifact_root())
         self.step_timeout_grace_sec = step_timeout_grace_sec
         self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="mtp-step")
+        # Playwright 的同步 API 通过 greenlet 工作；浏览器会话从创建到关闭必须
+        # 始终停留在同一 OS 线程，不能与普通工具共用可切换 worker 的线程池。
+        self._playwright_executor = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="mtp-playwright"
+        )
+        self._closed = False
 
     # ------------------------------------------------------------------
     # 生命周期
     # ------------------------------------------------------------------
     def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        if self.registry.is_active("playwright"):
+            try:
+                adapter = self.registry.get("playwright")
+                self._playwright_executor.submit(adapter.close).result(timeout=10)
+            except Exception:  # noqa: BLE001 - 关闭失败不能阻断其他资源释放
+                pass
+        self._playwright_executor.shutdown(wait=False, cancel_futures=True)
         self._executor.shutdown(wait=False, cancel_futures=True)
         self.registry.close_all()
+
+    def _executor_for(self, adapter_name: str) -> ThreadPoolExecutor:
+        return self._playwright_executor if adapter_name == "playwright" else self._executor
+
+    def _invoke_adapter(
+        self, adapter_name: str, operation: Callable[..., ActionResult], *args: Any
+    ) -> ActionResult:
+        """让同步 Playwright 的所有入口保持线程亲和性。"""
+        if adapter_name == "playwright":
+            return self._playwright_executor.submit(operation, *args).result()
+        return operation(*args)
 
     def __enter__(self) -> "TestRunner":
         return self
@@ -210,7 +237,9 @@ class TestRunner:
             )
             try:
                 adapter = self.registry.get(adapter_name)
-                outcome: ActionResult = adapter.do_execute(act, args, step_ctx)
+                outcome = self._invoke_adapter(
+                    adapter_name, adapter.do_execute, act, args, step_ctx
+                )
                 return {
                     "ok": outcome.ok,
                     "data": outcome.data,
@@ -437,7 +466,9 @@ class TestRunner:
         except MtpError as exc:
             return ActionResult.failure(action, exc, adapter=adapter_name)
 
-        future = self._executor.submit(adapter.execute, action, args, step_ctx)
+        future = self._executor_for(adapter_name).submit(
+            adapter.execute, action, args, step_ctx
+        )
         try:
             return future.result(timeout=timeout_sec + self.step_timeout_grace_sec)
         except FuturesTimeout:
@@ -541,7 +572,9 @@ class TestRunner:
             "snapshot" if kind == "snapshot" else
             "console_messages" if kind == "console" else "network_requests"
         )
-        outcome = adapter.do_execute(action, args, ctx)
+        outcome = self._invoke_adapter(
+            "playwright", adapter.do_execute, action, args, ctx
+        )
         if not outcome.ok:
             raise RuntimeError(outcome.summary)
 

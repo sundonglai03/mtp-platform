@@ -22,7 +22,7 @@ class ToolRegistry(Protocol):
         ...
 
     def is_active(self, name: str) -> bool:
-        """该工具当前是否可用（未注册或健康检查失败则为 False）。"""
+        """该工具是否已经注册或实例化。"""
         ...
 
     def close_all(self) -> None:
