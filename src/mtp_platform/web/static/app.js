@@ -107,11 +107,9 @@ if (detail) {
   const openCases = new Set();
   const openSteps = new Set();
   const openEvidence = new Set();
-  const openGroups = new Set();
   const detailCache = new Map();
   const previewCache = new Map();
   let casesSignature = "";
-  let evidenceSignature = "";
 
   // ---- 证据 ---------------------------------------------------------------
   function isImage(item) {
@@ -396,48 +394,6 @@ if (detail) {
     });
   }
 
-  // ---- 证据总览（按用例 / 步骤分组） --------------------------------------
-  function evidenceGroupKey(item) {
-    const parts = String(item.path || "").split("/");
-    const caseId = item.case_id || parts[1] || "-";
-    const stepId = item.step_id || parts[2] || "-";
-    return `${caseId} / ${stepId}`;
-  }
-
-  function renderEvidence(entries) {
-    const signature = JSON.stringify(entries);
-    if (signature === evidenceSignature) return;
-    evidenceSignature = signature;
-    const element = document.getElementById("evidence-links");
-    if (!entries.length) {
-      element.innerHTML = '<span class="muted">暂无</span>';
-      return;
-    }
-    const groups = new Map();
-    entries.forEach((item) => {
-      const key = evidenceGroupKey(item);
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(item);
-    });
-    element.innerHTML = [...groups.entries()].map(([key, items]) => `<details class="evidence-group" data-group="${escapeAttr(key)}"${openGroups.has(key) ? " open" : ""}>
-      <summary>
-        <span class="evidence-group-title">${escapeHtml(key)}</span>
-        <span class="muted">${items.length} 项</span>
-      </summary>
-      <div class="evidence-list">${items.map(renderEvidenceItem).join("")}</div>
-    </details>`).join("");
-    element.querySelectorAll("details.evidence-group").forEach((node) => {
-      node.addEventListener("toggle", () => {
-        if (node.open) {
-          openGroups.add(node.dataset.group);
-        } else {
-          openGroups.delete(node.dataset.group);
-        }
-      });
-      node.querySelectorAll("details.evidence-item").forEach(bindEvidenceItem);
-    });
-  }
-
   function render(run) {
     const statusNode = document.getElementById("run-status");
     statusNode.textContent = statusLabel[run.status] || run.status;
@@ -453,7 +409,6 @@ if (detail) {
     error.textContent = run.first_failure?.message || "";
     error.classList.toggle("hidden", !run.first_failure);
     renderCases(run.cases || []);
-    renderEvidence(run.evidence || []);
     document.getElementById("cancel-run").disabled = terminal.has(run.status);
     return terminal.has(run.status);
   }

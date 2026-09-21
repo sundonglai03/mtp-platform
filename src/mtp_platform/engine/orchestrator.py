@@ -13,13 +13,11 @@
 - **重试**：`retry` + `retry_delay_ms`，且每一步的尝试次数都记在结果里；
 - **取消**：`cancel(run_id)` 置位后，在步骤之间与重试之间尽快停下，状态落到
   `cancelled`，已经跑过的步骤与证据全部保留；
-- **失败有截图**：Playwright 相关步骤失败时自动补一张截图 + 快照，
-  并记录当前 URL 与页面文本。
+- **失败有截图**：Playwright 相关步骤失败时自动补一张截图。
 """
 
 from __future__ import annotations
 
-import json
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
@@ -47,26 +45,6 @@ from mtp_contracts.variables import LazySecrets, resolve
 # 它由 `_run_cleanup` 在 finally 里执行，保证成功/失败/取消/异常四种情况都跑到，
 # 放进来会变成执行两次。
 PHASE_ORDER = ("fixtures", "preconditions", "steps")
-
-# 步骤产出在文本证据里的呈现顺序
-_OUTPUT_KEYS = ("command", "stdout", "stderr", "text")
-
-
-def _render_step_output(data: dict[str, Any]) -> str:
-    """把非浏览器步骤的产出渲染成可读文本；没有产出时返回空串。"""
-    parts: list[str] = []
-    for key in _OUTPUT_KEYS:
-        value = data.get(key)
-        if value in (None, ""):
-            continue
-        parts.append(f"{value}" if key == "command" else f"--- {key} ---\n{value}")
-    rows = data.get("rows")
-    if isinstance(rows, list) and rows:
-        parts.append("--- rows ---\n" + json.dumps(rows, ensure_ascii=False, indent=2, default=str))
-    exit_code = data.get("exit_code")
-    if exit_code is not None:
-        parts.append(f"[exit] {exit_code}")
-    return "\n\n".join(parts)
 
 
 class TestRunner:
@@ -511,11 +489,8 @@ class TestRunner:
             )
 
     # ------------------------------------------------------------------
-    # 证据
+    # 证据：只采截图
     # ------------------------------------------------------------------
-    # 单份文本证据的字符上限：轮询型步骤（guard/poll）的 stdout 动辄上万字符
-    EVIDENCE_TEXT_LIMIT = 256 * 1024
-
     def _collect_evidence(
         self,
         step: dict[str, Any],
@@ -524,71 +499,26 @@ class TestRunner:
         case: dict[str, Any],
         run_id: str,
     ) -> None:
-        declared = list(step.get("evidence") or [])
-        case_id = str(case.get("id"))
-        step_id = record.step_id
-        namespace = record.action.partition(".")[0]
+        """按当前策略采集证据：能截图的截一张，截不了的不留文字。
 
-        if namespace != "playwright":
-            # ssh / mysql / http 这类步骤没有截图可采，不落文本就等于事后完全
-            # 无法回溯。默认采集，显式写 `evidence: []` 可关闭。
-            if step.get("evidence") is not None and not declared:
-                return
-            self._save_step_output(store, record, case_id, step_id)
-            return
-
-        if not declared:
-            return
-        if "text" in declared and record.data.get("text"):
-            store.save_text("text", case_id, step_id, "step-output", str(record.data["text"]))
-
-        if "snapshot" in declared:
-            self._playwright_evidence(store, case, run_id, "snapshot", step_id, "snapshot",
-                                      {"filename": f"snapshot-{step_id}.md"}, ext=".md")
-        if "screenshot" in declared:
-            self._playwright_evidence(store, case, run_id, "screenshot", step_id, "screenshot",
-                                      {"scale": "css", "fullPage": True}, ext=".png")
-        if "console" in declared:
-            self._playwright_evidence(store, case, run_id, "console", step_id, "console",
-                                      {"level": "info", "all": True}, ext=".log")
-        if "network" in declared:
-            self._playwright_evidence(store, case, run_id, "network", step_id, "network",
-                                      {"static": False}, ext=".log")
-
-    def _save_step_output(
-        self,
-        store: EvidenceStore,
-        record: StepResult,
-        case_id: str,
-        step_id: str,
-    ) -> None:
-        """把非浏览器步骤的产出（命令/标准输出/标准错误/行集）落成一份文本证据。
-
-        写入前由 EvidenceStore 统一脱敏，所以证据目录里不会出现凭据原文。
+        - 浏览器步骤只要声明了 `evidence`（写 screenshot，还是写成
+          snapshot / console / network 都一样）就截一张 PNG；
+        - ssh / mysql / http 这类截不了图的步骤不再落 stdout/stderr 文本，
+          步骤产出在「步骤输出」里仍然可见，只是不再另存证据文件。
         """
-        text = _render_step_output(record.data)
-        if not text:
+        if not record.action.startswith("playwright."):
             return
-        limit = self.EVIDENCE_TEXT_LIMIT
-        if len(text) > limit:
-            text = f"{text[:limit]}\n…（输出超过 {limit} 字符，已截断）"
-        store.save_text(
-            "output",
-            case_id,
-            step_id,
-            "output",
-            text,
-            ext=".txt",
-            summary=f"步骤输出 {len(text)} 字符",
-        )
+        if not list(step.get("evidence") or []):
+            return
+        self._screenshot(store, case, run_id, record.step_id, "screenshot")
 
     def _capture_failure(
         self, record: StepResult, store: EvidenceStore, case: dict[str, Any], run_id: str
     ) -> None:
-        """失败自动补证据：截图 + 快照。
+        """失败自动补一张截图。
 
         只在**浏览器相关**步骤失败、且浏览器会话已经起过时才去采集 —— 否则一个
-        纯 SQL 用例失败会把 Playwright 也拉起来，白白多花十几秒。拿不到浏览器
+        纯 SQL 用例失败会把 Playwright 也拉起来，白白多花十几秒。拿不到截图
         只记一条告警，不掩盖原始错误。
         """
         if not record.action.startswith("playwright."):
@@ -596,27 +526,20 @@ class TestRunner:
         if not self.registry.is_active("playwright"):
             return
 
-        step_id = record.step_id
         try:
-            self._playwright_evidence(store, case, run_id, "screenshot", step_id,
-                                      f"failure-{step_id}", {"scale": "css", "fullPage": True}, ext=".png")
-            self._playwright_evidence(store, case, run_id, "snapshot", step_id,
-                                      f"failure-{step_id}", {}, ext=".md")
+            self._screenshot(store, case, run_id, record.step_id, f"failure-{record.step_id}")
         except Exception as exc:  # noqa: BLE001
             record.data.setdefault("evidence_warning", f"无法采集失败截图: {exc}")
 
-    def _playwright_evidence(
+    def _screenshot(
         self,
         store: EvidenceStore,
         case: dict[str, Any],
         run_id: str,
-        kind: str,
         step_id: str,
         name: str,
-        args: dict[str, Any],
-        *,
-        ext: str,
     ) -> None:
+        """截一张整页 PNG 存成证据（真实适配器把 base64 放在 raw 里）。"""
         case_id = str(case.get("id"))
         adapter = self.registry.get("playwright")
         ctx = StepContext(
@@ -625,22 +548,16 @@ class TestRunner:
             step_id=step_id,
             env=dict(case.get("environment") or {}),
         )
-        action = "screenshot" if kind == "screenshot" else (
-            "snapshot" if kind == "snapshot" else
-            "console_messages" if kind == "console" else "network_requests"
-        )
         outcome = self._invoke_adapter(
-            "playwright", adapter.do_execute, action, args, ctx
+            "playwright", adapter.do_execute, "screenshot", {"scale": "css", "fullPage": True}, ctx
         )
         if not outcome.ok:
             raise RuntimeError(outcome.summary)
 
         for item in outcome.raw:
             if isinstance(item, dict) and item.get("type") == "image" and item.get("_base64"):
-                store.save_base64(kind, case_id, step_id, name, item["_base64"], ext=".png")
+                store.save_base64("screenshot", case_id, step_id, name, item["_base64"], ext=".png")
                 return
-        if outcome.data.get("text"):
-            store.save_text(kind, case_id, step_id, name, str(outcome.data["text"]), ext=ext)
 
     # ------------------------------------------------------------------
     # 断言与清理

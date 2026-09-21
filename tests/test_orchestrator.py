@@ -112,6 +112,15 @@ class ThreadBoundPlaywrightAdapter:
                 PolicyDeniedError("mock click failure", adapter=self.name, action=action),
                 adapter=self.name,
             )
+        if action == "screenshot":
+            # 真实适配器把 PNG 以 base64 放在 raw 里，证据层据此落盘
+            return ActionResult.success(
+                action,
+                adapter=self.name,
+                data={},
+                summary="ok",
+                raw=[{"type": "image", "_base64": "iVBORw0KGgo="}],
+            )
         if action == "snapshot":
             data = {"page_text": "页面正常", "text": "页面正常"}
         elif action == "evaluate":
@@ -198,9 +207,10 @@ def test_successful_case_passes(config):
 
 
 # ---------------------------------------------------------------------------
-# 步骤产出证据：非浏览器步骤默认落文本（否则 ssh/mysql 用例事后无法回溯）
+# 证据策略：只采截图（能截图的截一张，截不了的不留文字）
 # ---------------------------------------------------------------------------
-def test_non_browser_step_output_is_stored_as_evidence(config):
+def test_non_browser_step_does_not_store_evidence(config):
+    """ssh / mysql 这类截不了图的步骤不再落 stdout/stderr 文本证据。"""
     adapter = RecordingAdapter(
         script=[
             {
@@ -214,28 +224,42 @@ def test_non_browser_step_output_is_stored_as_evidence(config):
     result = run(config, {"recorder": adapter}, case_with())
 
     assert result.status == RunState.PASSED
-    stored = [item for item in result.evidence if item["kind"] == "output"]
-    assert len(stored) == 1
-    text = (ARTIFACTS / stored[0]["path"]).read_text(encoding="utf-8")
-    assert "--- stdout ---" in text
-    assert "round 1: CH1=NORMAL" in text
-    assert "[exit] 0" in text
+    assert result.evidence == []
 
 
-def test_browser_step_does_not_store_text_evidence(config):
+def test_browser_step_only_collects_a_screenshot(config):
+    """声明 snapshot / console / network 也只截一张 PNG，不落文本。"""
+    adapter = ThreadBoundPlaywrightAdapter()
+    case = case_with(
+        steps=[
+            {
+                "id": "open",
+                "action": "playwright.navigate",
+                "args": {"url": "http://127.0.0.1/"},
+                "evidence": ["snapshot", "console", "network"],
+            }
+        ]
+    )
+    result = run(config, {"playwright": adapter}, case)
+
+    assert result.status == RunState.PASSED
+    assert adapter.actions_seen.count("screenshot") == 1
+    assert "snapshot" not in adapter.actions_seen
+    assert "console_messages" not in adapter.actions_seen
+    assert "network_requests" not in adapter.actions_seen
+    assert [item["kind"] for item in result.evidence] == ["screenshot"]
+    assert result.evidence[0]["path"].endswith("screenshot.png")
+
+
+def test_browser_step_without_declared_evidence_collects_nothing(config):
+    """没声明 evidence 的浏览器步骤不截图（失败时才会自动补一张）。"""
     case = case_with(
         steps=[{"id": "open", "action": "playwright.navigate", "args": {"url": "http://127.0.0.1/"}}]
     )
     result = run(config, {"playwright": ThreadBoundPlaywrightAdapter()}, case)
-    assert not [item for item in result.evidence if item["kind"] == "output"]
 
-
-def test_step_can_opt_out_of_text_evidence(config):
-    case = case_with(
-        steps=[{"id": "s1", "action": "recorder.do", "args": {}, "evidence": []}]
-    )
-    result = run(config, {"recorder": RecordingAdapter(script=[{"stdout": "noise"}])}, case)
-    assert not [item for item in result.evidence if item["kind"] == "output"]
+    assert result.status == RunState.PASSED
+    assert result.evidence == []
 
 
 def test_playwright_steps_evidence_probes_and_close_stay_on_one_thread(config):
@@ -270,8 +294,11 @@ def test_playwright_steps_evidence_probes_and_close_stay_on_one_thread(config):
     assert adapter.closed is True
     assert adapter.owner_thread is not None
     assert adapter.actions_seen.count("screenshot") == 2
-    assert adapter.actions_seen.count("snapshot") == 2
+    assert adapter.actions_seen.count("snapshot") == 0
     assert "evaluate" in adapter.actions_seen
+    # 声明的截图 + 失败自动补的截图
+    names = sorted(item["path"].rsplit("/", 1)[-1] for item in result.evidence)
+    assert names == ["failure-click.png", "screenshot.png"]
 
 
 def test_failed_assertion_marks_case_failed(config):
