@@ -17,11 +17,12 @@ ENV UV_COMPILE_BYTECODE=1 \
 # 想压镜像可以改成：--extra ssh --extra mysql（按需裁剪）。
 #
 # 依赖层只依赖 pyproject.toml / uv.lock：改 src 不会触发重装。
-# 构建机装了 buildx（Docker 23+ 自带，或 docker-buildx-plugin）后，可以给这两条
-# RUN 加上 --mount=type=cache,target=/root/.cache/uv，让「锁文件变更后的重装」
-# 也能复用宿主机缓存，不必重新下载 wheel 和 clone git 依赖。
+# --mount=type=cache 把 uv 的下载缓存（约定路径 /root/.cache/uv）挂到宿主机的
+# 构建缓存上：锁文件变更导致重装时，wheel 与 mtp-contracts-core 的 git 依赖都从
+# 缓存取，不再重新下载；缓存不进镜像层。需要构建机装了 buildx（已装 v0.37.1）。
 COPY pyproject.toml uv.lock README.md ./
-RUN uv sync --no-dev --frozen \
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --no-dev --frozen \
     --extra ssh --extra mysql --extra playwright \
     --no-install-project
 
@@ -43,7 +44,8 @@ RUN if [ "$MTP_INSTALL_BROWSER" = "1" ]; then \
 # 再装本包源码
 COPY src ./src
 COPY mtp_config.yaml ./mtp_config.yaml
-RUN uv sync --no-dev --frozen \
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --no-dev --frozen \
     --extra ssh --extra mysql --extra playwright
 
 EXPOSE 8080
