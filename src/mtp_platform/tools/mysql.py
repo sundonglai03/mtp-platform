@@ -65,14 +65,11 @@ class MysqlTool(BaseTool):
     # -- 策略（复用基线逻辑）-----------------------------------------------
     def _credentials(self, args: dict[str, Any], context: StepContext) -> dict[str, Any]:
         creds = args.get("credentials")
-        if creds is None:
-            # 允许用例从 secrets 组装，避免把密码写进 JSON
-            creds = context.secrets.get("credentials") if context.secrets else None
         if not isinstance(creds, dict):
             raise ConfigError(
                 "mysql 步骤缺少 credentials",
                 adapter=self.name,
-                detail="需要 {host,user,password,database}；密码请通过环境变量注入",
+                detail="需要在测试 JSON 中传入 {host,user,password,database}",
             )
         if not creds.get("host"):
             raise ConfigError("mysql credentials 缺少 host", adapter=self.name)

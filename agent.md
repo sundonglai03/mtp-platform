@@ -37,6 +37,7 @@
 4. 不得传文件路径、JSON 文件内容字符串、YAML/YML、Markdown 或完整的 `{"suite": {...}}` 包装对象。
 5. MCP 不生成、不猜测、不修复业务步骤；它只校验，并且仅在缺失时补 `schema_version: 1`。
 6. 同一次调用中的 `case.id` 必须唯一。
+7. 测试凭证必须包含在 JSON 用例的 `secrets` 中，值就是实际测试凭证；平台和 tools 不保存凭证，也不从容器环境变量补取。
 
 ## Playwright 用例规则
 

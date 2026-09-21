@@ -19,6 +19,8 @@ docker compose logs mtp-platform
 
 一次只能上传一个 `.json` 测试套件文件，文件名可自由命名。根节点必须是对象，`cases` 必须是非空数组；每个元素都是完整测试用例，且 `id` 在套件内唯一。只要其中任意一个用例无效，任务不会创建。
 
+连接 MySQL、SSH 等外部系统所需的测试凭证随 JSON 套件传入；平台配置和 tools 不保存凭证。建议集中放在每个用例的 `secrets` 对象中并通过 `{{ secrets.xxx }}` 引用。任务结果和证据会对凭证字段及已登记的凭证值脱敏。
+
 ```json
 {
   "cases": [
@@ -26,6 +28,7 @@ docker compose logs mtp-platform
       "schema_version": 1,
       "id": "login-success",
       "title": "正常登录",
+      "secrets": {"ssh_password": "test-password"},
       "steps": [
         {
           "id": "open",

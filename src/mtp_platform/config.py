@@ -111,23 +111,3 @@ def load_config(
         base_dir=base,
     )
 
-
-def resolve_secrets(mapping: dict[str, str] | None) -> dict[str, str]:
-    """把 `{逻辑名: 环境变量名}` 解析成 `{逻辑名: 真实值}`。
-
-    缺环境变量时抛 ConfigError —— 明确报错好过静默用空串跑出一个假失败。
-    """
-    resolved: dict[str, str] = {}
-    missing: list[str] = []
-    for logical, env_name in (mapping or {}).items():
-        value = os.environ.get(str(env_name))
-        if value is None:
-            missing.append(str(env_name))
-        else:
-            resolved[str(logical)] = value
-    if missing:
-        raise ConfigError(
-            f"缺少必需的环境变量: {', '.join(sorted(missing))}",
-            detail="凭据只允许通过环境变量注入，禁止写入用例或配置文件",
-        )
-    return resolved
