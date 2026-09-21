@@ -731,10 +731,9 @@ wheels = [
 [[package]]
 name = "mtp-contracts-core"
 version = "0.1.0"
-source = { git = "https://github.com/sundonglai03/mtp-contracts-core.git?tag=v0.1.0#1b740b79adcd3e6fee295cc1c0d616c8fb683823" }
+source = { git = "https://github.com/sundonglai03/mtp-contracts-core.git?tag=v0.1.1#4764124420a408956bed2395c5f9ca1127497d00" }
 dependencies = [
     { name = "jsonschema" },
-    { name = "pyyaml" },
 ]
 
 [[package]]
@@ -775,7 +774,7 @@ requires-dist = [
     { name = "itsdangerous", specifier = ">=2.2" },
     { name = "jinja2", specifier = ">=3.1" },
     { name = "jsonpath-ng", specifier = ">=1.6" },
-    { name = "mtp-contracts-core", git = "https://github.com/sundonglai03/mtp-contracts-core.git?tag=v0.1.0" },
+    { name = "mtp-contracts-core", git = "https://github.com/sundonglai03/mtp-contracts-core.git?tag=v0.1.1" },
     { name = "paramiko", marker = "extra == 'ssh'", specifier = ">=3.4" },
     { name = "playwright", marker = "extra == 'playwright'", specifier = ">=1.40" },
     { name = "pymysql", marker = "extra == 'mysql'", specifier = ">=1.1" },

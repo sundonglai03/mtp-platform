@@ -9,7 +9,7 @@ description = "常驻 HTTP 测试服务：接收 JSON 测试套件并执行"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "mtp-contracts-core==0.1.0",
+    "mtp-contracts-core==0.1.1",
     "PyYAML>=6.0",
     "Jinja2>=3.1",
     "jsonpath-ng>=1.6",
@@ -28,7 +28,7 @@ playwright = ["playwright>=1.40"]
 dev = ["pytest>=9.0", "httpx>=0.28"]
 
 [tool.uv.sources]
-mtp-contracts-core = { git = "https://github.com/sundonglai03/mtp-contracts-core.git", tag = "v0.1.0" }
+mtp-contracts-core = { git = "https://github.com/sundonglai03/mtp-contracts-core.git", tag = "v0.1.1" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
