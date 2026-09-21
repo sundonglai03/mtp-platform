@@ -479,8 +479,17 @@ def create_app(*, config_path: str | None = None) -> FastAPI:
 
     @app.get("/api/runs/{run_id}/evidence/{evidence_path:path}")
     def download_evidence(
-        run_id: str, evidence_path: str, _user: str = Depends(_require_user)
+        run_id: str,
+        evidence_path: str,
+        inline: bool = False,
+        _user: str = Depends(_require_user),
     ):
+        """取一份证据。
+
+        默认 `attachment`（下载）；带 `?inline=1` 时改为 `inline`，让详情页在
+        浏览器里直接预览而不落地成文件。非图片的预览一律按纯文本返回，
+        避免证据被当成可执行文档渲染。
+        """
         run = repository.get(run_id)
         if not run:
             raise HTTPException(status_code=404, detail="任务不存在")
@@ -491,7 +500,15 @@ def create_app(*, config_path: str | None = None) -> FastAPI:
         target = _safe_child(run_root, evidence_path)
         if not target.is_file():
             raise HTTPException(status_code=404, detail="证据不存在")
-        return FileResponse(target, filename=target.name, media_type=entry["mime_type"])
+        media_type = str(entry["mime_type"])
+        if inline and not media_type.startswith("image/"):
+            media_type = "text/plain; charset=utf-8"
+        response = FileResponse(target, media_type=media_type)
+        disposition = "inline" if inline else "attachment"
+        filename = target.name.replace('"', "")
+        response.headers["content-disposition"] = f'{disposition}; filename="{filename}"'
+        response.headers["x-content-type-options"] = "nosniff"
+        return response
 
     @app.exception_handler(401)
     async def unauthorized(request: Request, exc: HTTPException):

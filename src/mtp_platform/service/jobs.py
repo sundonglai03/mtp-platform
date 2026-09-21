@@ -133,6 +133,11 @@ def _first_failure(results: list[CaseResult]) -> dict[str, str | None] | None:
 
 
 def _evidence(results: list[CaseResult]) -> list[dict[str, Any]]:
+    """证据索引。
+
+    除路径外还带上 `case_id / step_id / kind`：详情页要按「用例 → 步骤」分组折叠，
+    光靠从路径里切字符串太脆（`_safe()` 会把非法字符压成 `-`）。
+    """
     entries: list[dict[str, Any]] = []
     seen: set[str] = set()
     for result in results:
@@ -144,6 +149,10 @@ def _evidence(results: list[CaseResult]) -> list[dict[str, Any]]:
             entries.append(
                 {
                     "path": path,
+                    "case_id": str(item.get("case_id") or result.case_id),
+                    "step_id": str(item.get("step_id") or ""),
+                    "kind": str(item.get("kind") or ""),
+                    "summary": str(item.get("summary") or ""),
                     "mime_type": str(item.get("mime_type") or "application/octet-stream"),
                     "size": int(item.get("bytes") or 0),
                 }

@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 from mtp_contracts.results import CaseResult, RunState, StepResult, StepStatus
 
 from mtp_platform.service.executor import RunOutcome, summarize
-from mtp_platform.service.jobs import JobManager
+from mtp_platform.service.jobs import JobManager, _evidence
 from mtp_platform.service.repository import RunRepository
 from mtp_platform.web.app import _safe_child, create_app
 
@@ -245,6 +245,55 @@ def test_failure_and_png_evidence_are_stored_in_sqlite_and_require_login(web_cli
     evidence = client.get(run["evidence"][0]["url"])
     assert evidence.headers["content-type"] == "image/png"
     assert client.get("/api/runs/known/evidence/../private.png").status_code == 404
+
+
+def test_evidence_can_be_previewed_inline_without_downloading(web_client):
+    """文本证据带 `?inline=1` 时按纯文本内联返回，详情页因此能直接预览。"""
+    client, app = web_client
+    run_root = app.state.artifacts_root / "runs" / "preview"
+    artifact = run_root / "evidence" / "WEB-001" / "open" / "output.txt"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_text("--- stdout ---\nok", encoding="utf-8")
+    app.state.repository.create(run_id="preview", uploads=[], options={})
+    app.state.repository.update(
+        "preview",
+        status="passed",
+        evidence_json='[{"path": "evidence/WEB-001/open/output.txt", "mime_type": "text/plain", "size": 18}]',
+    )
+    _login(client)
+    url = client.get("/api/runs/preview").json()["evidence"][0]["url"]
+    assert client.get(url).headers["content-disposition"].startswith("attachment")
+    preview = client.get(f"{url}?inline=1")
+    assert preview.status_code == 200
+    assert preview.headers["content-disposition"].startswith("inline")
+    assert preview.text == "--- stdout ---\nok"
+
+
+def test_evidence_index_keeps_case_and_step_for_grouping():
+    """证据索引要带上用例与步骤，前端才能按「用例 / 步骤」分组折叠。"""
+    result = CaseResult(run_id="run", case_id="WEB-001", status=RunState.PASSED)
+    result.evidence = [
+        {
+            "path": "evidence/WEB-001/open/output.txt",
+            "case_id": "WEB-001",
+            "step_id": "open",
+            "kind": "output",
+            "summary": "步骤输出 12 字符",
+            "mime_type": "text/plain",
+            "bytes": 12,
+        }
+    ]
+    assert _evidence([result]) == [
+        {
+            "path": "evidence/WEB-001/open/output.txt",
+            "case_id": "WEB-001",
+            "step_id": "open",
+            "kind": "output",
+            "summary": "步骤输出 12 字符",
+            "mime_type": "text/plain",
+            "size": 12,
+        }
+    ]
 
 
 def test_invalid_deployment_config_is_reported_when_creating_a_task(tmp_path, monkeypatch):
