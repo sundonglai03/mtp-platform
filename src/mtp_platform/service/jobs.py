@@ -8,6 +8,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from mtp_contracts.redaction import redact, registry_for_cases
 from mtp_contracts.results import CaseResult, StepResult, now_iso
 
 from .executor import RunExecutor, RunRequest, summarize
@@ -77,6 +78,35 @@ def _case_result(result: CaseResult) -> dict[str, Any]:
 def _evidence_url(run_id: str, path: str) -> str:
     """证据的 HTTP 访问地址。"""
     return f"/api/runs/{run_id}/evidence/{path}"
+
+
+def _uploaded_cases(run: dict[str, Any]) -> list[dict[str, Any]]:
+    """读回本次任务上传的用例文件（读不到就跳过，不因为脱敏失败而影响执行）。"""
+    cases: list[dict[str, Any]] = []
+    for raw in run.get("uploads") or []:
+        try:
+            with Path(str(raw)).open("r", encoding="utf-8") as fh:
+                payload = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        if isinstance(payload, dict):
+            cases.append(payload)
+    return cases
+
+
+def _scrubber(run: dict[str, Any]) -> Any:
+    """结果写入前的统一脱敏。
+
+    只登记**值**（套件 `secrets` 的值 + 敏感字段名的字面量），在执行上下文里**不**
+    替换——否则后续步骤引用 `{{ steps.x.stdout }}` 会拿到占位符而失真。这里作用于
+    最终落库的那一份：步骤 data、stdout/stderr、断言明细、错误与证据摘要。
+    """
+    registry = registry_for_cases(_uploaded_cases(run))
+
+    def scrub(node: Any) -> Any:
+        return redact(node, registry=registry)
+
+    return scrub
 
 
 def _attach_evidence_urls(run_id: str, items: Any) -> list[Any]:
@@ -277,23 +307,25 @@ class JobManager:
         with self._lock:
             self._active[run_id] = cancel
         results: list[CaseResult] = []
+        scrub = None
         try:
             if not self.repository.claim(run_id):
                 return
             run = self.repository.get(run_id)
             if not run:
                 return
+            scrub = _scrubber(run)
 
             def progress(result: CaseResult, done: int, _total: int) -> None:
                 results.append(result)
                 self.repository.update(
                     run_id,
                     cases_done=done,
-                    cases_json=json.dumps([_case_result(item) for item in results], ensure_ascii=False),
+                    cases_json=json.dumps(scrub([_case_result(item) for item in results]), ensure_ascii=False),
                     summary_json=json.dumps(summarize(results, cancelled=False), ensure_ascii=False),
-                    first_failure_json=json.dumps(_first_failure(results), ensure_ascii=False),
-                    evidence_json=json.dumps(_evidence(results), ensure_ascii=False),
-                    case_details_json=json.dumps(_case_details(results), ensure_ascii=False),
+                    first_failure_json=json.dumps(scrub(_first_failure(results)), ensure_ascii=False),
+                    evidence_json=json.dumps(scrub(_evidence(results)), ensure_ascii=False),
+                    case_details_json=json.dumps(scrub(_case_details(results)), ensure_ascii=False),
                 )
 
             outcome = RunExecutor().execute(
@@ -320,14 +352,16 @@ class JobManager:
                 status=status,
                 finished_at=now_iso(),
                 cases_done=len(outcome.results),
-                cases_json=json.dumps([_case_result(item) for item in outcome.results], ensure_ascii=False),
+                cases_json=json.dumps(scrub([_case_result(item) for item in outcome.results]), ensure_ascii=False),
                 summary_json=json.dumps(outcome.summary, ensure_ascii=False),
-                first_failure_json=json.dumps(_first_failure(outcome.results), ensure_ascii=False),
-                evidence_json=json.dumps(_evidence(outcome.results), ensure_ascii=False),
-                case_details_json=json.dumps(_case_details(outcome.results), ensure_ascii=False),
+                first_failure_json=json.dumps(scrub(_first_failure(outcome.results)), ensure_ascii=False),
+                evidence_json=json.dumps(scrub(_evidence(outcome.results)), ensure_ascii=False),
+                case_details_json=json.dumps(scrub(_case_details(outcome.results)), ensure_ascii=False),
             )
         except Exception as exc:  # noqa: BLE001 - job boundary must persist failure
             message = f"{type(exc).__name__}: {exc}"
+            if scrub is not None:
+                message = scrub(message)
             self.repository.update(
                 run_id,
                 status="error",

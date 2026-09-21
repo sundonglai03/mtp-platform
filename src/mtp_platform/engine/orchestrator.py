@@ -36,7 +36,7 @@ from mtp_contracts.errors import (
 )
 from .evidence import EvidenceStore
 from mtp_contracts.config import PlatformConfig
-from mtp_contracts.redaction import is_sensitive_key
+from mtp_contracts.redaction import collect_secret_values
 from .ports import ToolRegistry
 from mtp_contracts.results import CaseResult, RunState, StepResult, StepStatus, new_run_id, now_iso
 from mtp_contracts.variables import LazySecrets, resolve
@@ -638,18 +638,9 @@ class TestRunner:
 
 
 def _register_case_credentials(case: dict[str, Any], store: EvidenceStore) -> None:
-    """登记 JSON 套件中的凭证值，防止进入错误、断言或证据文本。"""
-    def walk(node: Any, *, under_secrets: bool = False) -> None:
-        if isinstance(node, dict):
-            for key, value in node.items():
-                secret_value = under_secrets or str(key) == "secrets"
-                if secret_value and not isinstance(value, (dict, list)):
-                    store.registry.register(value)
-                elif is_sensitive_key(key) and not isinstance(value, (dict, list)):
-                    store.registry.register(value)
-                walk(value, under_secrets=secret_value)
-        elif isinstance(node, list):
-            for value in node:
-                walk(value, under_secrets=under_secrets)
+    """登记 JSON 套件中的凭证值，防止进入错误、断言或证据文本。
 
-    walk(case)
+    取值逻辑放在 core（`collect_secret_values`），与任务结果写入点（`jobs._scrubber`）
+    用同一套规则，避免两处各写一遍、其中一处漏掉。
+    """
+    store.registry.register_many(collect_secret_values(case))
