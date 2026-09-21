@@ -142,7 +142,8 @@ def _validate_suite(payload: Any) -> tuple[list[dict[str, Any]], list[dict[str, 
                     case_index=index,
                     case_id=case_id,
                     path=issue.path,
-                    code=issue.kind,
+                    # 与 MCP 的 build_suite 用同一份动作目录，问题码也保持同一套
+                    code=issue.error_code,
                     message=issue.message,
                 )
             )
