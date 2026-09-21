@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 from mtp_contracts.results import CaseResult, RunState, StepResult, StepStatus
 
 from mtp_platform.service.executor import RunOutcome, summarize
-from mtp_platform.service.jobs import JobManager, _evidence
+from mtp_platform.service.jobs import JobManager, _case_details, _evidence
 from mtp_platform.service.repository import RunRepository
 from mtp_platform.web.app import _safe_child, create_app
 
@@ -286,6 +286,7 @@ def test_evidence_index_keeps_case_and_step_for_grouping():
     assert _evidence([result]) == [
         {
             "path": "evidence/WEB-001/open/output.txt",
+            "url": "/api/runs/run/evidence/evidence/WEB-001/open/output.txt",
             "case_id": "WEB-001",
             "step_id": "open",
             "kind": "output",
@@ -294,6 +295,22 @@ def test_evidence_index_keeps_case_and_step_for_grouping():
             "size": 12,
         }
     ]
+
+
+def test_case_detail_evidence_carries_preview_url():
+    """步骤级证据也必须带 url，否则详情页渲染成「该证据没有可访问的文件」。"""
+    result = CaseResult(run_id="run-1", case_id="C-1", status=RunState.PASSED)
+    step = StepResult(step_id="click-query", action="playwright.click", status=StepStatus.PASSED)
+    step.evidence = [
+        {"path": "evidence/C-1/click-query/screenshot.png", "mime_type": "image/png", "bytes": 128}
+    ]
+    result.steps = [step]
+    result.evidence = list(step.evidence)
+
+    detail = _case_details([result])["C-1"]
+    expected = "/api/runs/run-1/evidence/evidence/C-1/click-query/screenshot.png"
+    assert detail["steps"][0]["evidence"][0]["url"] == expected
+    assert detail["evidence"][0]["url"] == expected
 
 
 def test_invalid_deployment_config_is_reported_when_creating_a_task(tmp_path, monkeypatch):

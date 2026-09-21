@@ -74,6 +74,27 @@ def _case_result(result: CaseResult) -> dict[str, Any]:
     }
 
 
+def _evidence_url(run_id: str, path: str) -> str:
+    """证据的 HTTP 访问地址。"""
+    return f"/api/runs/{run_id}/evidence/{path}"
+
+
+def _attach_evidence_urls(run_id: str, items: Any) -> list[Any]:
+    """给证据条目补上可访问地址。
+
+    步骤级证据原先只有 `path`，详情页得自己拼 URL，漏掉就会渲染成
+    「该证据没有可访问的文件」。统一在这里补上；历史任务的明细里没有这个字段，
+    前端另做了按 path 兜底的拼接。
+    """
+    out: list[Any] = []
+    for item in items or []:
+        if isinstance(item, dict) and item.get("path"):
+            out.append({**item, "url": _evidence_url(run_id, str(item["path"]))})
+        else:
+            out.append(item)
+    return out
+
+
 def _step_detail(step: StepResult) -> dict[str, Any]:
     payload = _clip(step.to_dict())
     # 这三个是给变量解析用的内部字段，详情里没必要暴露
@@ -88,6 +109,13 @@ def _case_details(results: list[CaseResult]) -> dict[str, dict[str, Any]]:
     """逐用例的完整明细，按 case_id 索引后落库，供详情接口按需读取。"""
     details: dict[str, dict[str, Any]] = {}
     for result in results:
+        steps = [_step_detail(step) for step in result.steps]
+        for step in steps:
+            step["evidence"] = _attach_evidence_urls(result.run_id, step.get("evidence"))
+        cleanup = _clip(result.cleanup)
+        for step in cleanup:
+            if isinstance(step, dict):
+                step["evidence"] = _attach_evidence_urls(result.run_id, step.get("evidence"))
         detail: dict[str, Any] = {
             "case_id": result.case_id,
             "title": result.title,
@@ -99,12 +127,12 @@ def _case_details(results: list[CaseResult]) -> dict[str, dict[str, Any]]:
             "finished_at": result.finished_at,
             "duration_ms": result.duration_ms,
             "counts": result.counts(),
-            "steps": [_step_detail(step) for step in result.steps],
+            "steps": steps,
             "assertions": _clip(result.assertions),
-            "cleanup": _clip(result.cleanup),
+            "cleanup": cleanup,
             "warnings": [_clip_text(str(item)) for item in result.warnings],
             "error": _clip(result.error),
-            "evidence": result.evidence,
+            "evidence": _attach_evidence_urls(result.run_id, result.evidence),
         }
         if len(json.dumps(detail, ensure_ascii=False)) > DETAIL_CASE_LIMIT:
             for step in detail["steps"]:
@@ -149,6 +177,7 @@ def _evidence(results: list[CaseResult]) -> list[dict[str, Any]]:
             entries.append(
                 {
                     "path": path,
+                    "url": _evidence_url(result.run_id, path),
                     "case_id": str(item.get("case_id") or result.case_id),
                     "step_id": str(item.get("step_id") or ""),
                     "kind": str(item.get("kind") or ""),

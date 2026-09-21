@@ -139,11 +139,21 @@ if (detail) {
     return parts[parts.length - 1] || item.path || "证据";
   }
 
+  // 新的任务明细里后端会直接给 url；历史任务的明细只有 path，
+  // 这里兜底拼出可访问地址，否则会渲染成「该证据没有可访问的文件」。
+  function evidenceUrl(item) {
+    if (item.url) return item.url;
+    const path = item.path || "";
+    if (!path) return "";
+    const encoded = path.split("/").map(encodeURIComponent).join("/");
+    return `/api/runs/${encodeURIComponent(runId)}/evidence/${encoded}`;
+  }
+
   function renderEvidenceItem(item) {
     const key = evidenceKey(item);
     const label = kindLabel[item.kind] || item.kind || "证据";
     const size = item.bytes ?? item.size ?? 0;
-    return `<details class="evidence-item" data-key="${escapeAttr(key)}" data-url="${escapeAttr(item.url || "")}" data-mime="${escapeAttr(item.mime_type || "")}" data-file="${escapeAttr(item.path || "")}"${openEvidence.has(key) ? " open" : ""}>
+    return `<details class="evidence-item" data-key="${escapeAttr(key)}" data-url="${escapeAttr(evidenceUrl(item))}" data-mime="${escapeAttr(item.mime_type || "")}" data-file="${escapeAttr(item.path || "")}"${openEvidence.has(key) ? " open" : ""}>
       <summary>
         <span class="evidence-kind">${escapeHtml(label)}</span>
         <code>${escapeHtml(evidenceName(item))}</code>
