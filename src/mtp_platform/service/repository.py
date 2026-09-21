@@ -42,6 +42,7 @@ class RunRepository:
                     summary_json TEXT NOT NULL DEFAULT '{"passed": 0, "failed": 0, "error": 0, "cancelled": 0}',
                     first_failure_json TEXT,
                     evidence_json TEXT NOT NULL DEFAULT '[]',
+                    case_details_json TEXT NOT NULL DEFAULT '{}',
                     error TEXT
                 )
                 """
@@ -53,6 +54,9 @@ class RunRepository:
                 "cases_json": "TEXT NOT NULL DEFAULT '[]'",
                 "first_failure_json": "TEXT",
                 "evidence_json": "TEXT NOT NULL DEFAULT '[]'",
+                # 逐用例的步骤/断言明细（按 case_id 索引）。列表接口不返回它，
+                # 只有 /api/runs/{run_id}/cases/{case_id} 按需读取，避免列表响应变胖。
+                "case_details_json": "TEXT NOT NULL DEFAULT '{}'",
             }
             for name, definition in migrations.items():
                 if name not in existing:
@@ -103,6 +107,7 @@ class RunRepository:
             "summary_json",
             "first_failure_json",
             "evidence_json",
+            "case_details_json",
             "error",
         }
         unknown = set(fields) - allowed
@@ -150,7 +155,14 @@ class RunRepository:
     @staticmethod
     def _decode(row: sqlite3.Row) -> dict[str, Any]:
         result = dict(row)
-        for field in ("uploads_json", "options_json", "cases_json", "summary_json", "evidence_json"):
+        for field in (
+            "uploads_json",
+            "options_json",
+            "cases_json",
+            "summary_json",
+            "evidence_json",
+            "case_details_json",
+        ):
             result[field.removesuffix("_json")] = json.loads(result.pop(field))
         first_failure_json = result.pop("first_failure_json")
         result["first_failure"] = json.loads(first_failure_json) if first_failure_json else None

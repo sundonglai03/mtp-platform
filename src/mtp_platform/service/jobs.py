@@ -8,18 +8,110 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from mtp_contracts.results import CaseResult, now_iso
+from mtp_contracts.results import CaseResult, StepResult, now_iso
 
 from .executor import RunExecutor, RunRequest, summarize
 from .repository import TERMINAL_STATES, RunRepository
 
+# 详情里单条字符串的上限。轮询型步骤（guard/poll）的 stdout 动辄上万字符，
+# 不截断会把 SQLite 和详情接口一起撑大。
+DETAIL_TEXT_LIMIT = 4000
+# 单个用例详情序列化后的软上限；超过就丢掉步骤输出，只保留结构与结论。
+DETAIL_CASE_LIMIT = 200_000
+
+
+def _clip_text(value: str, limit: int = DETAIL_TEXT_LIMIT) -> str:
+    if len(value) <= limit:
+        return value
+    return f"{value[:limit]}…（已截断，完整 {len(value)} 字符）"
+
+
+def _clip(node: Any) -> Any:
+    """递归截断长字符串，保留结构。"""
+    if isinstance(node, str):
+        return _clip_text(node)
+    if isinstance(node, dict):
+        return {str(key): _clip(value) for key, value in node.items()}
+    if isinstance(node, (list, tuple)):
+        return [_clip(item) for item in node]
+    return node
+
+
+def _failure_ref(result: CaseResult) -> dict[str, str] | None:
+    """用例的第一个失败点，压成适合列表展示的短结构。"""
+    failure = result.first_failure()
+    if not failure:
+        return None
+    kind = str(failure.get("kind") or "case")
+    if kind == "step":
+        error = failure.get("error") or {}
+        return {
+            "kind": "step",
+            "step_id": str(failure.get("step_id") or ""),
+            "message": str(failure.get("summary") or error.get("message") or "步骤失败"),
+        }
+    if kind == "assertion":
+        return {
+            "kind": "assertion",
+            "step_id": "",
+            "message": str(
+                failure.get("message")
+                or f"断言 {failure.get('id')} 期望 {failure.get('expected')!r}，实际 {failure.get('actual')!r}"
+            ),
+        }
+    return {"kind": kind, "step_id": "", "message": str(failure.get("message") or "用例执行失败")}
+
 
 def _case_result(result: CaseResult) -> dict[str, Any]:
+    """列表用的用例摘要：状态、耗时、断言计数、第一条失败点。"""
     return {
         "case_id": result.case_id,
+        "title": result.title,
         "status": result.status.value,
         "duration_ms": result.duration_ms,
+        "counts": result.counts(),
+        "first_failure": _failure_ref(result),
     }
+
+
+def _step_detail(step: StepResult) -> dict[str, Any]:
+    payload = _clip(step.to_dict())
+    # 这三个是给变量解析用的内部字段，详情里没必要暴露
+    data = payload.get("data")
+    if isinstance(data, dict):
+        for key in ("step_ok", "step_status", "step_id"):
+            data.pop(key, None)
+    return payload
+
+
+def _case_details(results: list[CaseResult]) -> dict[str, dict[str, Any]]:
+    """逐用例的完整明细，按 case_id 索引后落库，供详情接口按需读取。"""
+    details: dict[str, dict[str, Any]] = {}
+    for result in results:
+        detail: dict[str, Any] = {
+            "case_id": result.case_id,
+            "title": result.title,
+            "module": result.module,
+            "priority": result.priority,
+            "tags": list(result.tags),
+            "status": result.status.value,
+            "started_at": result.started_at,
+            "finished_at": result.finished_at,
+            "duration_ms": result.duration_ms,
+            "counts": result.counts(),
+            "steps": [_step_detail(step) for step in result.steps],
+            "assertions": _clip(result.assertions),
+            "cleanup": _clip(result.cleanup),
+            "warnings": [_clip_text(str(item)) for item in result.warnings],
+            "error": _clip(result.error),
+            "evidence": result.evidence,
+        }
+        if len(json.dumps(detail, ensure_ascii=False)) > DETAIL_CASE_LIMIT:
+            for step in detail["steps"]:
+                step["data"] = {"truncated": True}
+            detail["truncated"] = True
+        details[result.case_id] = detail
+    return details
 
 
 def _first_failure(results: list[CaseResult]) -> dict[str, str | None] | None:
@@ -163,6 +255,7 @@ class JobManager:
                     summary_json=json.dumps(summarize(results, cancelled=False), ensure_ascii=False),
                     first_failure_json=json.dumps(_first_failure(results), ensure_ascii=False),
                     evidence_json=json.dumps(_evidence(results), ensure_ascii=False),
+                    case_details_json=json.dumps(_case_details(results), ensure_ascii=False),
                 )
 
             outcome = RunExecutor().execute(
@@ -193,6 +286,7 @@ class JobManager:
                 summary_json=json.dumps(outcome.summary, ensure_ascii=False),
                 first_failure_json=json.dumps(_first_failure(outcome.results), ensure_ascii=False),
                 evidence_json=json.dumps(_evidence(outcome.results), ensure_ascii=False),
+                case_details_json=json.dumps(_case_details(outcome.results), ensure_ascii=False),
             )
         except Exception as exc:  # noqa: BLE001 - job boundary must persist failure
             message = f"{type(exc).__name__}: {exc}"

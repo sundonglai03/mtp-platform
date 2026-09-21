@@ -345,6 +345,23 @@ def create_app(*, config_path: str | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="任务不存在")
         return _public_run(run)
 
+    @app.get("/api/runs/{run_id}/cases/{case_id}")
+    def api_run_case(
+        run_id: str, case_id: str, _user: str = Depends(_require_user)
+    ) -> dict[str, Any]:
+        """单个用例的步骤与断言明细。
+
+        刻意不放进 `/api/runs/{run_id}`：轮询型步骤的 stdout 很大，
+        列表/详情接口一次带全会让响应失控。这里按用例按需读取。
+        """
+        run = repository.get(run_id)
+        if not run:
+            raise HTTPException(status_code=404, detail="任务不存在")
+        detail = (run.get("case_details") or {}).get(case_id)
+        if not detail:
+            raise HTTPException(status_code=404, detail="用例详情不存在")
+        return detail
+
     @app.post("/api/runs", status_code=status.HTTP_202_ACCEPTED)
     async def create_run(
         request: Request,

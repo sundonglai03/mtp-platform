@@ -197,6 +197,47 @@ def test_successful_case_passes(config):
     assert result.steps[0].duration_ms >= 0
 
 
+# ---------------------------------------------------------------------------
+# 步骤产出证据：非浏览器步骤默认落文本（否则 ssh/mysql 用例事后无法回溯）
+# ---------------------------------------------------------------------------
+def test_non_browser_step_output_is_stored_as_evidence(config):
+    adapter = RecordingAdapter(
+        script=[
+            {
+                "command": "cat /tmp/bypass",
+                "stdout": "round 1: CH1=NORMAL",
+                "stderr": "warn",
+                "exit_code": 0,
+            }
+        ]
+    )
+    result = run(config, {"recorder": adapter}, case_with())
+
+    assert result.status == RunState.PASSED
+    stored = [item for item in result.evidence if item["kind"] == "output"]
+    assert len(stored) == 1
+    text = (ARTIFACTS / stored[0]["path"]).read_text(encoding="utf-8")
+    assert "--- stdout ---" in text
+    assert "round 1: CH1=NORMAL" in text
+    assert "[exit] 0" in text
+
+
+def test_browser_step_does_not_store_text_evidence(config):
+    case = case_with(
+        steps=[{"id": "open", "action": "playwright.navigate", "args": {"url": "http://127.0.0.1/"}}]
+    )
+    result = run(config, {"playwright": ThreadBoundPlaywrightAdapter()}, case)
+    assert not [item for item in result.evidence if item["kind"] == "output"]
+
+
+def test_step_can_opt_out_of_text_evidence(config):
+    case = case_with(
+        steps=[{"id": "s1", "action": "recorder.do", "args": {}, "evidence": []}]
+    )
+    result = run(config, {"recorder": RecordingAdapter(script=[{"stdout": "noise"}])}, case)
+    assert not [item for item in result.evidence if item["kind"] == "output"]
+
+
 def test_playwright_steps_evidence_probes_and_close_stay_on_one_thread(config):
     adapter = ThreadBoundPlaywrightAdapter()
     case = case_with(

@@ -1,6 +1,6 @@
 # mtp-platform
 
-`mtp-platform` 是一个带登录的常驻 HTTP 测试服务。用户在浏览器上传唯一的 JSON 测试套件，后台执行后查看任务进度、每个用例结果、第一条失败原因和浏览器证据。
+`mtp-platform` 是一个带登录的常驻 HTTP 测试服务。用户在浏览器上传唯一的 JSON 测试套件，后台执行后查看任务进度、每个用例结果、第一条失败原因；展开单个用例还能看到逐步骤输出与断言明细，以及浏览器截图和步骤文本证据。
 
 不提供 CLI；不接收 YAML/YML 测试用例；不生成 Excel、Word、HTML、JUnit 或 JSON 报告文件。
 
@@ -41,9 +41,11 @@ docker compose logs mtp-platform
 }
 ```
 
-任务详情只显示状态、进度、开始/结束时间、耗时、每个用例的状态和耗时，以及第一条失败原因。浏览器步骤失败产生的 PNG 截图和文本快照保存到 `artifacts/runs/<run_id>/evidence/`；详情页会预览 PNG，其他证据提供下载链接。
+任务详情显示状态、进度、开始/结束时间、耗时，以及每个用例的状态、耗时、断言通过数和第一条失败原因。用例行可展开，展开时按需调用 `GET /api/runs/{run_id}/cases/{case_id}` 拉取该用例的步骤（含 stdout/stderr 输出、错误、重试次数）和断言（期望值/实际值）。超长输出会截断并标注，单个用例明细过大时只保留结构、省略步骤正文。
 
-SQLite 文件 `artifacts/mtp-platform.sqlite3` 是唯一的任务结果来源。它只保存精简的用例结果、第一条失败原因以及证据的路径、MIME 类型和文件大小；不嵌入图片内容。
+证据保存到 `artifacts/runs/<run_id>/evidence/`：浏览器步骤失败产生的 PNG 截图和文本快照，以及 ssh / mysql / http 等**非浏览器步骤的 stdout/stderr 文本**（默认采集；若要关闭，在该步骤上写 `"evidence": []`）。详情页会预览 PNG，其他证据提供下载链接。
+
+SQLite 文件 `artifacts/mtp-platform.sqlite3` 是唯一的任务结果来源。它保存用例摘要（状态、耗时、断言计数、第一条失败点）、逐用例的步骤与断言明细，以及证据的路径、MIME 类型和文件大小；不嵌入图片内容。明细不随列表接口返回，只由用例详情接口按需读取，避免响应随步骤输出膨胀。
 
 ## HTTP 接口
 
@@ -61,6 +63,7 @@ GET  /runs/{run_id}
 POST /api/runs
 GET  /api/runs
 GET  /api/runs/{run_id}
+GET  /api/runs/{run_id}/cases/{case_id}
 POST /api/runs/{run_id}/cancel
 GET  /api/runs/{run_id}/evidence/{path}
 ```

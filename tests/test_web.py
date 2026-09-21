@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import sqlite3
 import subprocess
 import time
 from pathlib import Path
@@ -12,7 +13,7 @@ from pathlib import Path
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from mtp_contracts.results import CaseResult, RunState
+from mtp_contracts.results import CaseResult, RunState, StepResult, StepStatus
 
 from mtp_platform.service.executor import RunOutcome, summarize
 from mtp_platform.service.jobs import JobManager
@@ -59,6 +60,26 @@ def _fake_execute(_self, request, *, cancel_event=None, on_progress=None):
             title=case["title"],
             status=RunState.PASSED,
             duration_ms=1,
+            steps=[
+                StepResult(
+                    step_id="snapshot",
+                    action="playwright.snapshot",
+                    status=StepStatus.PASSED,
+                    duration_ms=1,
+                    summary="页面快照已保存",
+                    data={"text": "MTP 测试平台"},
+                )
+            ],
+            assertions=[
+                {
+                    "id": "a-title",
+                    "type": "contains",
+                    "description": "标题包含 MTP",
+                    "passed": True,
+                    "expected": "MTP",
+                    "actual": "MTP 测试平台",
+                }
+            ],
         )
         results.append(result)
         if on_progress:
@@ -121,10 +142,53 @@ def test_one_test_suite_creates_only_minimal_sqlite_result(web_client):
     assert (run["cases_total"], run["cases_done"]) == (2, 2)
     assert run["summary"] == {"passed": 2, "failed": 0, "error": 0, "cancelled": 0}
     assert run["first_failure"] is None
-    assert all(set(case) == {"case_id", "status", "duration_ms"} for case in run["cases"])
+    # 列表接口只给摘要；步骤/断言明细改由按需的用例详情接口返回，不内联在这里
+    assert all(
+        set(case) == {"case_id", "title", "status", "duration_ms", "counts", "first_failure"}
+        for case in run["cases"]
+    )
+    assert all("steps" not in case and "assertions" not in case for case in run["cases"])
     assert not (app.state.artifacts_root / "runs" / run_id / "reports").exists()
     assert not list(app.state.artifacts_root.rglob("latest"))
     assert not list(app.state.artifacts_root.rglob("history.jsonl"))
+
+
+def _wait_terminal(client: TestClient, run_id: str) -> dict:
+    for _ in range(80):
+        run = client.get(f"/api/runs/{run_id}").json()
+        if run["status"] in {"passed", "failed", "error", "cancelled"}:
+            return run
+        time.sleep(0.01)
+    raise AssertionError(f"任务未在预期时间内结束: {run}")
+
+
+def test_case_detail_endpoint_exposes_steps_and_assertions(web_client):
+    client, _app = web_client
+    _login(client)
+    run_id = _post_suite(client, content=_suite(VALID_CASE)).json()["run_id"]
+    summary = _wait_terminal(client, run_id)["cases"][0]
+    assert summary["counts"] == {"assertions_total": 1, "assertions_passed": 1, "assertions_failed": 0}
+    assert summary["first_failure"] is None
+
+    response = client.get(f"/api/runs/{run_id}/cases/WEB-001")
+    assert response.status_code == 200
+    detail = response.json()
+    assert detail["case_id"] == "WEB-001"
+    assert detail["counts"]["assertions_total"] == 1
+    assert [step["step_id"] for step in detail["steps"]] == ["snapshot"]
+    assert detail["steps"][0]["data"]["text"] == "MTP 测试平台"
+    assert [item["id"] for item in detail["assertions"]] == ["a-title"]
+    assert detail["assertions"][0]["passed"] is True
+
+
+def test_case_detail_requires_login_and_known_case(web_client):
+    client, _app = web_client
+    assert client.get("/api/runs/whatever/cases/WEB-001").status_code == 401
+    _login(client)
+    run_id = _post_suite(client, content=_suite(VALID_CASE)).json()["run_id"]
+    _wait_terminal(client, run_id)
+    assert client.get(f"/api/runs/{run_id}/cases/NOPE").status_code == 404
+    assert client.get("/api/runs/no-such-run/cases/WEB-001").status_code == 404
 
 
 @pytest.mark.parametrize(
@@ -222,6 +286,44 @@ def test_repository_recovers_running_job_and_resumes_queued_json_cases(tmp_path,
         assert run["status"] == "passed"
     finally:
         manager.stop()
+
+
+def test_repository_adds_case_detail_column_to_existing_database(tmp_path):
+    """已有部署的旧库（无 case_details_json）打开时自动补列，既有任务不受影响。"""
+    path = tmp_path / "runs.db"
+    legacy = sqlite3.connect(path)
+    legacy.execute(
+        """
+        CREATE TABLE runs (
+            run_id TEXT PRIMARY KEY,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            started_at TEXT NOT NULL DEFAULT '',
+            finished_at TEXT NOT NULL DEFAULT '',
+            uploads_json TEXT NOT NULL,
+            options_json TEXT NOT NULL,
+            cases_total INTEGER NOT NULL DEFAULT 0,
+            cases_done INTEGER NOT NULL DEFAULT 0,
+            cases_json TEXT NOT NULL DEFAULT '[]',
+            summary_json TEXT NOT NULL DEFAULT '{}',
+            error TEXT
+        )
+        """
+    )
+    legacy.execute(
+        "INSERT INTO runs (run_id, status, created_at, uploads_json, options_json)"
+        " VALUES ('legacy', 'passed', '2026-01-01T00:00:00Z', '[]', '{}')"
+    )
+    legacy.commit()
+    legacy.close()
+
+    repository = RunRepository(path)
+    run = repository.get("legacy")
+    assert run["status"] == "passed"
+    assert run["case_details"] == {}
+
+    repository.update("legacy", case_details_json=json.dumps({"C-1": {"case_id": "C-1"}}))
+    assert repository.get("legacy")["case_details"] == {"C-1": {"case_id": "C-1"}}
 
 
 @pytest.mark.skipif(shutil.which("docker") is None, reason="Docker CLI is not installed")

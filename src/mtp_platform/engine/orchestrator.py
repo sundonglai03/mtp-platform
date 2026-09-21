@@ -19,6 +19,7 @@
 
 from __future__ import annotations
 
+import json
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
@@ -46,6 +47,26 @@ from mtp_contracts.variables import LazySecrets, resolve
 # 它由 `_run_cleanup` 在 finally 里执行，保证成功/失败/取消/异常四种情况都跑到，
 # 放进来会变成执行两次。
 PHASE_ORDER = ("fixtures", "preconditions", "steps")
+
+# 步骤产出在文本证据里的呈现顺序
+_OUTPUT_KEYS = ("command", "stdout", "stderr", "text")
+
+
+def _render_step_output(data: dict[str, Any]) -> str:
+    """把非浏览器步骤的产出渲染成可读文本；没有产出时返回空串。"""
+    parts: list[str] = []
+    for key in _OUTPUT_KEYS:
+        value = data.get(key)
+        if value in (None, ""):
+            continue
+        parts.append(f"{value}" if key == "command" else f"--- {key} ---\n{value}")
+    rows = data.get("rows")
+    if isinstance(rows, list) and rows:
+        parts.append("--- rows ---\n" + json.dumps(rows, ensure_ascii=False, indent=2, default=str))
+    exit_code = data.get("exit_code")
+    if exit_code is not None:
+        parts.append(f"[exit] {exit_code}")
+    return "\n\n".join(parts)
 
 
 class TestRunner:
@@ -492,6 +513,9 @@ class TestRunner:
     # ------------------------------------------------------------------
     # 证据
     # ------------------------------------------------------------------
+    # 单份文本证据的字符上限：轮询型步骤（guard/poll）的 stdout 动辄上万字符
+    EVIDENCE_TEXT_LIMIT = 256 * 1024
+
     def _collect_evidence(
         self,
         step: dict[str, Any],
@@ -501,17 +525,22 @@ class TestRunner:
         run_id: str,
     ) -> None:
         declared = list(step.get("evidence") or [])
-        if not declared:
-            return
         case_id = str(case.get("id"))
         step_id = record.step_id
+        namespace = record.action.partition(".")[0]
 
+        if namespace != "playwright":
+            # ssh / mysql / http 这类步骤没有截图可采，不落文本就等于事后完全
+            # 无法回溯。默认采集，显式写 `evidence: []` 可关闭。
+            if step.get("evidence") is not None and not declared:
+                return
+            self._save_step_output(store, record, case_id, step_id)
+            return
+
+        if not declared:
+            return
         if "text" in declared and record.data.get("text"):
             store.save_text("text", case_id, step_id, "step-output", str(record.data["text"]))
-
-        namespace = record.action.partition(".")[0]
-        if namespace != "playwright":
-            return
 
         if "snapshot" in declared:
             self._playwright_evidence(store, case, run_id, "snapshot", step_id, "snapshot",
@@ -525,6 +554,33 @@ class TestRunner:
         if "network" in declared:
             self._playwright_evidence(store, case, run_id, "network", step_id, "network",
                                       {"static": False}, ext=".log")
+
+    def _save_step_output(
+        self,
+        store: EvidenceStore,
+        record: StepResult,
+        case_id: str,
+        step_id: str,
+    ) -> None:
+        """把非浏览器步骤的产出（命令/标准输出/标准错误/行集）落成一份文本证据。
+
+        写入前由 EvidenceStore 统一脱敏，所以证据目录里不会出现凭据原文。
+        """
+        text = _render_step_output(record.data)
+        if not text:
+            return
+        limit = self.EVIDENCE_TEXT_LIMIT
+        if len(text) > limit:
+            text = f"{text[:limit]}\n…（输出超过 {limit} 字符，已截断）"
+        store.save_text(
+            "output",
+            case_id,
+            step_id,
+            "output",
+            text,
+            ext=".txt",
+            summary=f"步骤输出 {len(text)} 字符",
+        )
 
     def _capture_failure(
         self, record: StepResult, store: EvidenceStore, case: dict[str, Any], run_id: str
