@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mtp-platform"
-version = "0.2.7"
+version = "0.2.8"
 description = "常驻 HTTP 测试服务：接收 JSON 测试套件并执行"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "mtp-contracts-core==0.1.4",
+    "mtp-contracts-core==0.1.5",
     "PyYAML>=6.0",
     "Jinja2>=3.1",
     "jsonpath-ng>=1.6",
@@ -29,7 +29,7 @@ dev = ["pytest>=9.0", "httpx>=0.28"]
 
 [tool.uv.sources]
 # 固定到不可变 tag：v0.1.1 曾把标签挪到新提交，导致消费者锁到旧 core，不能再移动
-mtp-contracts-core = { git = "https://github.com/sundonglai03/mtp-contracts-core.git", tag = "v0.1.4" }
+mtp-contracts-core = { git = "https://github.com/sundonglai03/mtp-contracts-core.git", tag = "v0.1.5" }
 
 [tool.setuptools.packages.find]
 where = ["src"]

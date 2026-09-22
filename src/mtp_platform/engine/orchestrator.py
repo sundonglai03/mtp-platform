@@ -26,6 +26,7 @@ from typing import Any, Callable
 
 from mtp_contracts.adapters import ActionResult, StepContext
 from .assertions import AssertionEngine, AssertionResult
+from mtp_contracts.action_catalog import validate_args
 from mtp_contracts.case_validator import load_case, require_valid
 from mtp_contracts.errors import (
     CancelledError_,
@@ -427,6 +428,23 @@ class TestRunner:
                 record.error = error.to_dict()
                 record.data = {"error": error.to_dict()}
                 record.summary = error.message
+                break
+
+            # 模板解析后按**同一份动作契约**再校一次，闭合校验链路：静态校验时整串
+            # `{{ ... }}` 会跳过类型检查（解析后是什么类型由上下文决定），所以变量解析
+            # 完必须补这一刀。否则类型不对会一路带进执行阶段，报出来的是底层工具的怪错，
+            # 而不是「你引用的变量内容不对」。
+            resolved_issues = validate_args(action, args)
+            if resolved_issues:
+                detail = "；".join(f"{issue.path}: {issue.message}" for issue in resolved_issues)
+                record.status = StepStatus.FAILED
+                record.error = {
+                    "code": "invalid_resolved_arg",
+                    "message": f"变量解析后的参数不符合动作契约：{detail}",
+                    "detail": "用例里的 {{ ... }} 解析出来的类型或取值不对，请检查被引用的变量内容",
+                }
+                record.data = {"error": record.error}
+                record.summary = str(record.error["message"])
                 break
 
             adapter_name, _, act = action.partition(".")

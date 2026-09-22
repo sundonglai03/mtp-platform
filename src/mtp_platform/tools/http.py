@@ -204,11 +204,17 @@ class ApiTool(BaseTool):
                 action,
                 adapter=self.name,
                 data={
+                    # 与动作目录里 api.download 的返回契约逐字对齐：下载落的是文件，
+                    # 没有 json / text / extracted，但状态码与请求信息要给全，
+                    # 否则用例引用了"契约说有、实现没有"的字段会到运行时才炸。
                     "http_status": response.status_code,
-                    "duration_ms": duration_ms,
+                    "status_code": response.status_code,
+                    "ok": response.ok,
+                    "url": url,
+                    "method": method,
                     "output": str(target),
                     "bytes": len(response.content),
-                    "ok": response.ok,
+                    "duration_ms": duration_ms,
                 },
                 summary=f"{method} {url} -> {response.status_code}，已保存 {len(response.content)} 字节",
             )
