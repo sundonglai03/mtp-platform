@@ -249,10 +249,12 @@ class AssertionEngine:
         source = self._resolve_arg(a, "source", ctx)
         args = a.get("args") or {}
         path_expr = str(resolve(args.get("path", "$"), ctx))
-        expected = resolve(args["expected"], ctx) if "expected" in args else None
+        has_expected = "expected" in a or "expected" in args
+        expected_raw = a.get("expected") if "expected" in a else args.get("expected")
+        expected = resolve(expected_raw, ctx) if has_expected else None
 
         matches = _jsonpath_find(path_expr, source)
-        if "expected" not in args:
+        if not has_expected:
             passed = bool(matches)
             actual: Any = matches
             message = self._message(a, passed, f"路径 {path_expr} 应有匹配")

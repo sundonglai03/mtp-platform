@@ -218,14 +218,15 @@ class ApiTool(BaseTool):
             if not response.ok:
                 # 以前这里无条件 success：4xx/5xx 也判「步骤通过」，等于把下载失败吃掉。
                 data["error"] = f"HTTP {response.status_code}"
+            ok = response.ok or bool(args.get("allow_error"))
             return ActionResult(
-                ok=response.ok,
+                ok=ok,
                 action=action,
                 adapter=self.name,
                 data=data,
                 summary=f"{method} {url} -> {response.status_code}，已保存 {len(response.content)} 字节",
                 error=None
-                if response.ok
+                if ok
                 else ToolExecutionError(
                     f"HTTP {response.status_code}",
                     adapter=self.name,

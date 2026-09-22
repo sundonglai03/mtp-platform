@@ -83,6 +83,19 @@ def test_json_path_match_and_miss(engine):
     )
     assert ok.passed
 
+    top_level_expected = evaluate(
+        engine,
+        {
+            "id": "j-top",
+            "type": "json_path",
+            "source": "{{ steps.call.json }}",
+            "expected": 7,
+            "args": {"path": "$.data.id"},
+        },
+        context,
+    )
+    assert top_level_expected.passed
+
     miss = evaluate(
         engine,
         {"id": "j", "type": "json_path", "source": "{{ steps.call.json }}", "args": {"path": "$.data.nope", "expected": 1}},

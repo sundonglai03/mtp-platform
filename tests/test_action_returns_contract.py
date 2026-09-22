@@ -134,6 +134,11 @@ def test_failed_download_is_reported_as_failure(config, base_url):
         "失败路径的字段应与目录一致（含 error）"
     )
 
+    allowed = _run(config, "download", {"url": f"{base_url}/boom", "allow_error": True})
+    assert allowed.ok is True
+    assert allowed.error is None
+    assert "error" in allowed.data, "allow_error 放行后仍应保留 error，便于排查"
+
 
 def test_download_really_writes_the_file_with_get(config, base_url):
     """下载要看真效果：用 GET 发出去、文件真落盘、字节数对得上。
