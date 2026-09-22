@@ -32,13 +32,30 @@ ENV PATH="/app/.venv/bin:$PATH" \
     PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT=120000
 
 # 浏览器层必须放在 COPY src 之前：业务源码变化不会迫使 Docker 再下载浏览器。
-# 新机器首次构建仍会下载；网络瞬断时最多重试三次。
+#
+# 但**只要 pyproject.toml / uv.lock 变过**（改版本号、relock 都算），它上面那层
+# `uv sync` 就会重建，这一层跟着重建 —— 之前每次都要重新下载 Chromium 与
+# `--with-deps` 的系统依赖（实测 83s）。下面把「下载物」也挂到构建缓存上：
+#
+#   /root/.cache/browser-cache  Playwright 的浏览器下载缓存（跨层重建复用）
+#   /var/cache/apt              apt 已下载的 deb（--with-deps 不再重下）
+#   /var/lib/apt/lists          apt 索引（省掉每次 apt-get update）
+#
+# 缓存必须再拷进镜像：运行时要用浏览器，它不能只活在缓存挂载里（挂载不进镜像）。
+# 首次构建照常联网；之后重建这一层基本只剩本地拷贝。
+# 网络瞬断时最多重试三次。
 ARG MTP_INSTALL_BROWSER=1
-RUN if [ "$MTP_INSTALL_BROWSER" = "1" ]; then \
+RUN --mount=type=cache,target=/root/.cache/browser-cache \
+    --mount=type=cache,target=/var/cache/apt \
+    --mount=type=cache,target=/var/lib/apt/lists \
+    if [ "$MTP_INSTALL_BROWSER" = "1" ]; then \
       for attempt in 1 2 3; do \
-        playwright install --with-deps chromium && break; \
+        PLAYWRIGHT_BROWSERS_PATH=/root/.cache/browser-cache \
+          playwright install --with-deps chromium && break; \
         [ "$attempt" = 3 ] && exit 1; \
       done; \
+      mkdir -p "$PLAYWRIGHT_BROWSERS_PATH"; \
+      cp -a /root/.cache/browser-cache/. "$PLAYWRIGHT_BROWSERS_PATH"/; \
     fi
 
 # 再装本包源码
