@@ -15,17 +15,10 @@ function formatDuration(running) {
   return `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`;
 }
 
-// 服务端存的是 UTC，展示统一转成本地时区；原始值放在 title 里备查
-function formatTime(value) {
-  if (!value) return "-";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  const pad = (n) => String(n).padStart(2, "0");
-  return (
-    `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())} ` +
-    `${pad(parsed.getHours())}:${pad(parsed.getMinutes())}:${pad(parsed.getSeconds())}`
-  );
-}
+// 时间格式化统一放在 static/time.js（列表页也用同一份，避免两处实现漂移）；
+// 万一没加载到，退化成原样输出，不影响其它渲染。
+const formatTime =
+  (window.mtpTime && window.mtpTime.formatTime) || ((value) => value || "-");
 const statusLabel = {
   queued: "排队中",
   running: "执行中",

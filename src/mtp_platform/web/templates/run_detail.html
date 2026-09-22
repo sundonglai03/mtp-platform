@@ -10,8 +10,8 @@
   <section class="metrics">
     <div class="card"><span>状态</span><strong id="run-status" class="status status-{{ run.status }}">{{ status_labels.get(run.status, run.status) }}</strong></div>
     <div class="card"><span>进度</span><strong id="run-progress">{{ run.cases_done }}/{{ run.cases_total }}</strong></div>
-    <div class="card"><span>开始</span><strong id="run-started">{{ run.started_at or '-' }}</strong></div>
-    <div class="card"><span>结束</span><strong id="run-finished">{{ run.finished_at or '-' }}</strong></div>
+    <div class="card"><span>开始</span><strong id="run-started" data-iso="{{ run.started_at }}">{{ run.started_at or '-' }}</strong></div>
+    <div class="card"><span>结束</span><strong id="run-finished" data-iso="{{ run.finished_at }}">{{ run.finished_at or '-' }}</strong></div>
     <div class="card"><span>耗时</span><strong id="run-duration">-</strong></div>
   </section>
   <section class="card">
@@ -21,4 +21,4 @@
   </section>
 </div>
 {% endblock %}
-{% block scripts %}<script src="/static/app.js" defer></script>{% endblock %}
+{% block scripts %}<script src="/static/time.js" defer></script><script src="/static/app.js" defer></script>{% endblock %}

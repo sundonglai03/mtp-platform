@@ -15,7 +15,7 @@
         <td><code>{{ run.run_id }}</code></td>
         <td><span class="status status-{{ run.status }}">{{ status_labels.get(run.status, run.status) }}</span></td>
         <td>{{ run.cases_done }}/{{ run.cases_total }}</td>
-        <td>{{ run.created_at }}</td>
+        <td><time data-iso="{{ run.created_at }}">{{ run.created_at }}</time></td>
         <td><a href="/runs/{{ run.run_id }}">查看</a></td>
       </tr>
       {% else %}
@@ -25,3 +25,4 @@
   </table>
 </section>
 {% endblock %}
+{% block scripts %}<script src="/static/time.js" defer></script>{% endblock %}
