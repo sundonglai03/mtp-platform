@@ -1,6 +1,31 @@
 "use strict";
 
 const csrf = document.querySelector('meta[name="csrf-token"]')?.content || "";
+
+// 耗时只信服务端算好的 duration_ms：以前是拿浏览器的 Date.now() 去减服务器给的
+// started_at，两台机器时钟一有偏差，任务刚起来就会显示好几秒。
+// 这里保留一个基准值，运行中的任务在两次轮询之间用本地时间差平滑推进。
+let durationBaseline = {ms: null, at: 0};
+
+function formatDuration(running) {
+  if (durationBaseline.ms === null) return "-";
+  const elapsed = durationBaseline.ms + (running ? performance.now() - durationBaseline.at : 0);
+  const seconds = Math.floor(Math.max(0, elapsed) / 1000);
+  if (seconds < 60) return `${seconds} 秒`;
+  return `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`;
+}
+
+// 服务端存的是 UTC，展示统一转成本地时区；原始值放在 title 里备查
+function formatTime(value) {
+  if (!value) return "-";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  const pad = (n) => String(n).padStart(2, "0");
+  return (
+    `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())} ` +
+    `${pad(parsed.getHours())}:${pad(parsed.getMinutes())}:${pad(parsed.getSeconds())}`
+  );
+}
 const statusLabel = {
   queued: "排队中",
   running: "执行中",
@@ -277,7 +302,7 @@ if (detail) {
       </summary>
       <div class="step-detail">
         ${failure}
-        <p class="muted step-times">${escapeHtml(step.started_at || "-")} → ${escapeHtml(step.finished_at || "-")}</p>
+        <p class="muted step-times">${escapeHtml(formatTime(step.started_at))} → ${escapeHtml(formatTime(step.finished_at))}</p>
         ${output ? `<pre class="step-output">${escapeHtml(output)}</pre>` : ""}
         ${extra ? `<details class="raw-json"><summary>步骤原始数据</summary><pre class="step-output">${escapeHtml(extra)}</pre></details>` : ""}
         ${evidenceBlock}
@@ -399,12 +424,17 @@ if (detail) {
     statusNode.textContent = statusLabel[run.status] || run.status;
     statusNode.className = `status status-${run.status}`;
     document.getElementById("run-progress").textContent = `${run.cases_done}/${run.cases_total}`;
-    document.getElementById("run-started").textContent = run.started_at || "-";
-    document.getElementById("run-finished").textContent = run.finished_at || "-";
-    const started = Date.parse(run.started_at);
-    const finished = Date.parse(run.finished_at) || Date.now();
-    const elapsed = Number.isNaN(started) ? "-" : `${Math.max(0, Math.floor((finished - started) / 1000))} 秒`;
-    document.getElementById("run-duration").textContent = elapsed;
+    const done = terminal.has(run.status);
+    document.getElementById("run-started").textContent = formatTime(run.started_at);
+    document.getElementById("run-finished").textContent = formatTime(run.finished_at);
+    if (typeof run.duration_ms === "number") {
+      durationBaseline = {ms: run.duration_ms, at: performance.now()};
+    }
+    const durationNode = document.getElementById("run-duration");
+    durationNode.textContent = formatDuration(!done);
+    durationNode.title = run.started_at
+      ? `服务端计时：started_at=${run.started_at} finished_at=${run.finished_at || "(未结束)"}`
+      : "";
     const error = document.getElementById("run-error");
     error.textContent = run.first_failure?.message || "";
     error.classList.toggle("hidden", !run.first_failure);

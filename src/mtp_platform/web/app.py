@@ -7,6 +7,7 @@ import secrets
 import shutil
 import json
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any
 from uuid import uuid4
@@ -170,6 +171,29 @@ def _validate_suite(payload: Any) -> tuple[list[dict[str, Any]], list[dict[str, 
     return valid_cases, errors
 
 
+def _parse_iso(value: str) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _elapsed_ms(run: dict[str, Any]) -> int | None:
+    """任务耗时（毫秒），**统一用服务器时钟**计算。
+
+    运行中的任务也要有值，所以结束时间取「已完成就用 finished_at，否则用服务器当前时间」。
+    以前是前端拿浏览器的 `Date.now()` 去减服务器给的 `started_at`：两台机器时钟一有偏差，
+    任务刚起来就显示好几秒，看起来像平台算错了。排队中（还没有 started_at）返回 None，
+    前端显示 `-`。
+    """
+    started = _parse_iso(run.get("started_at") or "")
+    if started is None:
+        return None
+    finished = _parse_iso(run.get("finished_at") or "") or datetime.now(timezone.utc)
+    return max(0, int((finished - started).total_seconds() * 1000))
+
+
 def _public_run(run: dict[str, Any]) -> dict[str, Any]:
     evidence = [
         {
@@ -184,6 +208,8 @@ def _public_run(run: dict[str, Any]) -> dict[str, Any]:
         "created_at": run["created_at"],
         "started_at": run["started_at"],
         "finished_at": run["finished_at"],
+        # 耗时由服务端算好，前端不再用自己的时钟去减服务器时间戳
+        "duration_ms": _elapsed_ms(run),
         "cases_total": run["cases_total"],
         "cases_done": run["cases_done"],
         "summary": run["summary"],
