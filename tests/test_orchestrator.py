@@ -179,7 +179,16 @@ def case_with(**overrides) -> dict:
 def run(config, adapters, case, **kw):
     from mtp_contracts.case_validator import require_valid
 
-    require_valid(case)
+    # 假适配器声明的动作不在共用动作目录里，按「调用方自己注册的动作」传给校验器
+    # （真实部署下引擎自己会从注册表收集，见 TestRunner._declared_actions）。
+    require_valid(
+        case,
+        extra_actions=[
+            f"{name}.{action}"
+            for name, adapter in adapters.items()
+            for action in (adapter.actions() or {})
+        ],
+    )
     runner = make_runner(config, adapters, **kw)
     try:
         from mtp_platform.engine.evidence import EvidenceStore
@@ -460,8 +469,21 @@ def test_fixture_audit_warns_when_no_run_scoping(config):
             {
                 "id": "f1",
                 "action": "mysql.insert",
-                "args": {"table_name": "t", "row": {"a": 1}},
-                "cleanup": {"action": "mysql.delete", "args": {"table_name": "t", "where": {"a": 1}}},
+                "args": {
+                    "credentials": {"host": "h", "database": "d", "user": "u", "password": "p"},
+                    "table_name": "t",
+                    "row": {"a": 1},
+                },
+                "cleanup": {
+                    "action": "mysql.delete",
+                    "args": {
+                        "credentials": {"host": "h", "database": "d", "user": "u", "password": "p"},
+                        "table_name": "t",
+                        # where 是条件字符串，值走 where_params 绑定（契约如此，别传字典）
+                        "where": "a = %s",
+                        "where_params": [1],
+                    },
+                },
             }
         ],
     )
@@ -492,7 +514,8 @@ def test_cancel_between_steps(config):
                 {"id": "s1", "action": "recorder.do", "args": {}},
                 {"id": "s2", "action": "recorder.do", "args": {}},
             ]
-        )
+        ),
+        extra_actions=["recorder.do"],
     )
 
     original = adapter._next

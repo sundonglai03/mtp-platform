@@ -137,6 +137,7 @@ def test_one_test_suite_creates_only_minimal_sqlite_result(web_client):
     assert set(run) == {
         "run_id", "status", "created_at", "started_at", "finished_at",
         "cases_total", "cases_done", "summary", "first_failure", "cases", "evidence",
+        "duration_ms",
     }
     assert run["status"] == "passed"
     assert (run["cases_total"], run["cases_done"]) == (2, 2)

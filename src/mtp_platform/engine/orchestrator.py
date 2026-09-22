@@ -141,6 +141,28 @@ class TestRunner:
             except Exception as exc:  # noqa: BLE001 - 隔离失败只告警，不能拦住用例
                 result.warnings.append(f"{name} 会话隔离失败: {exc}")
 
+    def _declared_actions(self) -> list[str]:
+        """已实例化工具**自己声明的**动作（`工具名.动作`）。
+
+        共用目录覆盖平台自带工具；这里补上注入的测试替身与二次开发的自定义工具 ——
+        否则在没有真实工具的环境里（单测、本地二次开发），引擎会因为「未知动作」直接
+        拒绝用例。真实部署下两者一致，等于没有额外放行。
+        """
+        declared: list[str] = []
+        for name in self._active_adapter_names():
+            try:
+                adapter = self.registry.get(name)
+            except MtpError:
+                continue
+            actions = getattr(adapter, "actions", None)
+            if not callable(actions):
+                continue
+            try:
+                declared.extend(f"{name}.{action}" for action in actions())
+            except Exception:  # noqa: BLE001 - 工具自述失败不该拦住用例
+                continue
+        return declared
+
     def _active_adapter_names(self) -> list[str]:
         """注册表里已实例化的工具名；注册表没实现该能力时按「无」处理。"""
         names = getattr(self.registry, "active_names", None)
@@ -177,7 +199,7 @@ class TestRunner:
         )
         try:
             case = load_case(path)
-            require_valid(case, source=str(path))
+            require_valid(case, source=str(path), extra_actions=self._declared_actions())
         except MtpError as exc:
             result = CaseResult(
                 run_id=rid,

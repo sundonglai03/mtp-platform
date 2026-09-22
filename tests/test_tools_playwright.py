@@ -114,7 +114,7 @@ def fake_pw(monkeypatch):
         def __init__(self):
             self.contexts = []
 
-        def new_context(self):
+        def new_context(self, **kwargs):
             ctx = _Context()
             self.contexts.append(ctx)
             return ctx
