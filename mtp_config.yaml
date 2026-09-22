@@ -8,6 +8,10 @@
 # 说明：执行链路**不走 MCP**，这里的白名单/限额直接作用于 tools/ 下的直连工具。
 
 security:
+  # 内网被测站点普遍是自签证书（例如 https://192.168.10.33）：不开这个开关，
+  # chromium 会直接以 ERR_CERT_AUTHORITY_INVALID 失败，浏览器用例第一步就打不开页面。
+  # 代码默认关闭；这里是部署侧按需开启。
+  playwright_ignore_https_errors: true
   # 走代理的环境里，本地/内网被测目标不应该被代理接管（否则会拿到 502）。
   # loopback 永远绕过；这里再补充内网网段。用例可写 args.use_proxy: true 强制走代理。
   http_no_proxy:

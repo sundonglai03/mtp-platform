@@ -5,7 +5,7 @@ services:
   mtp-platform:
     container_name: mtp-platform
     build: .
-    image: mtp-platform:0.2.2
+    image: mtp-platform:0.2.3
     working_dir: /app
     environment:
       MTP_ARTIFACT_ROOT: /app/artifacts

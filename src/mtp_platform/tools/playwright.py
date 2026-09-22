@@ -92,9 +92,15 @@ class PlaywrightTool(BaseTool):
                 detail="安装： uv sync --extra playwright && playwright install chromium",
             )
         headless = bool(self.config.security.get("playwright_headless", True))
+        # 内网设备大量使用自签证书：不忽略的话 chromium 会直接以
+        # ERR_CERT_AUTHORITY_INVALID 失败，用例第一步就打不开页面。
+        # 代码默认 False（安全默认），部署侧按需要在 security.playwright_ignore_https_errors 打开。
+        ignore_https_errors = bool(
+            self.config.security.get("playwright_ignore_https_errors", False)
+        )
         self._pw = sync_playwright().start()
         self._browser = self._pw.chromium.launch(headless=headless)
-        self._context = self._browser.new_context()
+        self._context = self._browser.new_context(ignore_https_errors=ignore_https_errors)
         page = self._context.new_page()
         page.on("console", lambda m: self._console.append({"type": m.type, "text": m.text}))
         page.on("request", lambda r: self._requests.append({"method": r.method, "url": r.url}))
