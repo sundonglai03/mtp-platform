@@ -98,6 +98,12 @@ def _suite_error(
 
 def _validate_suite(payload: Any) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Validate one JSON suite before a background task is created."""
+    if isinstance(payload, dict) and "cases" not in payload:
+        # 也接受把 MCP build_suite 的完整返回原样存成文件（{"ok":..,"suite":{"cases":[..]},..}）：
+        # agent 直接落盘工具返回时，不需要人工再剥一层，避免「格式不对」这种无谓报错。
+        wrapped = payload.get("suite")
+        if isinstance(wrapped, dict) and "cases" in wrapped:
+            payload = wrapped
     if not isinstance(payload, dict):
         return [], [
             _suite_error(
@@ -415,7 +421,9 @@ def create_app(*, config_path: str | None = None) -> FastAPI:
                         )
                     output.write(chunk)
             try:
-                payload = json.loads(target.read_text(encoding="utf-8"))
+                # utf-8-sig：带 BOM 的文件（编辑器 / agent 落盘常见）也能直接读，
+                # 否则会被当成「不是合法 JSON」，用户看到的就是个格式报错。
+                payload = json.loads(target.read_text(encoding="utf-8-sig"))
             except json.JSONDecodeError as exc:
                 raise HTTPException(
                     status_code=422,
