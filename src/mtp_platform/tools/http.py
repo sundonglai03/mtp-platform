@@ -160,7 +160,9 @@ class ApiTool(BaseTool):
 
         args = args or {}
         url = self._resolve_url(args, context)
-        method = str(args.get("method") or action).upper()
+        # 动作名不一定等于 HTTP 方法：download 就是 GET（以前这里直接取 action，
+        # 于是请求以 `DOWNLOAD /path HTTP/1.1` 发出去，真服务器只会回 405/501）。
+        method = str(args.get("method") or ("GET" if action == "download" else action)).upper()
         timeout = float(args.get("timeout_sec") or 30)
 
         headers = {str(k): str(v) for k, v in (args.get("headers") or {}).items()}
@@ -200,23 +202,36 @@ class ApiTool(BaseTool):
                 )
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(response.content)
-            return ActionResult.success(
-                action,
+            data = {
+                # 与动作目录里 api.download 的返回契约逐字对齐：下载落的是文件，
+                # 没有 json / text / extracted，但状态码与请求信息要给全，
+                # 否则用例引用了"契约说有、实现没有"的字段会到运行时才炸。
+                "http_status": response.status_code,
+                "status_code": response.status_code,
+                "ok": response.ok,
+                "url": url,
+                "method": method,
+                "output": str(target),
+                "bytes": len(response.content),
+                "duration_ms": duration_ms,
+            }
+            if not response.ok:
+                # 以前这里无条件 success：4xx/5xx 也判「步骤通过」，等于把下载失败吃掉。
+                data["error"] = f"HTTP {response.status_code}"
+            return ActionResult(
+                ok=response.ok,
+                action=action,
                 adapter=self.name,
-                data={
-                    # 与动作目录里 api.download 的返回契约逐字对齐：下载落的是文件，
-                    # 没有 json / text / extracted，但状态码与请求信息要给全，
-                    # 否则用例引用了"契约说有、实现没有"的字段会到运行时才炸。
-                    "http_status": response.status_code,
-                    "status_code": response.status_code,
-                    "ok": response.ok,
-                    "url": url,
-                    "method": method,
-                    "output": str(target),
-                    "bytes": len(response.content),
-                    "duration_ms": duration_ms,
-                },
+                data=data,
                 summary=f"{method} {url} -> {response.status_code}，已保存 {len(response.content)} 字节",
+                error=None
+                if response.ok
+                else ToolExecutionError(
+                    f"HTTP {response.status_code}",
+                    adapter=self.name,
+                    action=action,
+                    detail=f"下载失败，落盘内容不是目标文件：{response.text[:300]}",
+                ),
             )
 
         body_json: Any = None
