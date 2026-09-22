@@ -27,6 +27,9 @@ class FakeRegistry:
     def is_active(self, name: str) -> bool:
         return name in self._adapters
 
+    def active_names(self) -> list[str]:
+        return sorted(self._adapters)
+
     def get(self, name: str) -> Any:
         if name not in self._adapters:
             raise ConfigError(

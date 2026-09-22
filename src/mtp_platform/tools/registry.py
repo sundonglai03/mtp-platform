@@ -41,6 +41,10 @@ class ToolRegistry:
         """该工具是否已经实例化（常用于判断浏览器会话是否已经起过）。"""
         return name in self._instances or name in self._overrides
 
+    def active_names(self) -> list[str]:
+        """已经实例化的工具名（引擎据此决定要给谁做用例级会话隔离）。"""
+        return sorted(set(self._instances) | set(self._overrides))
+
     # -- 获取 -------------------------------------------------------------
     def get(self, name: str) -> BaseTool:
         if name in self._overrides:

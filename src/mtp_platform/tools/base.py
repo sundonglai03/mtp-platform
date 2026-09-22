@@ -68,3 +68,12 @@ class BaseTool:
 
     def close(self) -> None:
         return None
+
+    def reset_session(self) -> None:
+        """清掉一个用例留下的会话状态（默认无状态，不用实现）。
+
+        有会话的工具覆盖它（目前只有浏览器）：引擎会在**每个用例开始前**调用，
+        让用例从「陌生访客」开始，不继承上一个用例的登录态、缓存与页面状态。
+        调用发生在工具自己的线程上（playwright 的线程亲和性由引擎保证）。
+        """
+        return None

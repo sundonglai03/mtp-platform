@@ -91,15 +91,24 @@ class PlaywrightTool(BaseTool):
                 adapter=self.name,
                 detail="安装： uv sync --extra playwright && playwright install chromium",
             )
-        headless = bool(self.config.security.get("playwright_headless", True))
+        if self._browser is None:
+            headless = bool(self.config.security.get("playwright_headless", True))
+            self._pw = sync_playwright().start()
+            self._browser = self._pw.chromium.launch(headless=headless)
+        return self._new_page()
+
+    def _new_page(self):
+        """开一个干净的浏览上下文与页面。
+
+        上下文之间 cookie / localStorage / 缓存互相隔离，所以会话隔离只要重建上下文
+        就等价于「换一个浏览器」，不必重启浏览器进程（省一次冷启动）。
+        """
         # 内网设备大量使用自签证书：不忽略的话 chromium 会直接以
         # ERR_CERT_AUTHORITY_INVALID 失败，用例第一步就打不开页面。
         # 代码默认 False（安全默认），部署侧按需要在 security.playwright_ignore_https_errors 打开。
         ignore_https_errors = bool(
             self.config.security.get("playwright_ignore_https_errors", False)
         )
-        self._pw = sync_playwright().start()
-        self._browser = self._pw.chromium.launch(headless=headless)
         self._context = self._browser.new_context(ignore_https_errors=ignore_https_errors)
         page = self._context.new_page()
         page.on("console", lambda m: self._console.append({"type": m.type, "text": m.text}))
@@ -120,6 +129,34 @@ class PlaywrightTool(BaseTool):
         except Exception:  # noqa: BLE001
             pass
         self._pw = self._browser = self._context = self._page = None
+
+    def reset_session(self) -> None:
+        """丢掉当前浏览上下文，让下一个用例从「陌生访客」开始。
+
+        引擎在每个用例开始前调用（见 `engine/orchestrator`）。只关上下文、保留浏览器
+        进程：cookie、localStorage、页面路由与弹窗状态全部清掉，但省掉重启浏览器的
+        一次冷启动（约 1s）。浏览器进程已经掉线时退化成完整重建，避免坏会话毒到下个用例。
+        """
+        browser = self._browser
+        alive = True
+        if browser is not None:
+            try:
+                alive = browser.is_connected()
+            except Exception:  # noqa: BLE001
+                alive = False
+        if not alive:
+            self.close()
+            return
+
+        for closer in (self._page, self._context):
+            try:
+                if closer is not None:
+                    closer.close()
+            except Exception:  # noqa: BLE001
+                pass
+        self._page = self._context = None
+        self._console.clear()
+        self._requests.clear()
 
     # -- 执行 ---------------------------------------------------------------
     def do_execute(self, action: str, args: dict[str, Any], context: StepContext) -> ActionResult:

@@ -103,6 +103,53 @@ class TestRunner:
             return self._playwright_executor.submit(operation, *args).result()
         return operation(*args)
 
+    # ------------------------------------------------------------------
+    # 用例级会话隔离
+    # ------------------------------------------------------------------
+    def _isolate_sessions(self, case: dict[str, Any], result: CaseResult) -> None:
+        """让每个用例从「陌生访客」开始，不继承上一个用例的会话。
+
+        背景：一次任务里所有用例**共用同一个浏览器**（会话常驻进程）。用例 A 过了登录
+        门禁之后，用例 B 的 `open-web` 会直接落到已登录页面 —— B 里「处理登录/UKey」那
+        段路径根本没被检验（假通过），而且 B 单独跑时行为就变了（顺序依赖）。
+
+        规则：
+        - 默认开启；部署侧可用 `runner.isolate_case_session: false` 整体关掉；
+        - 用例写 `reuse_session: true` 时跳过（它明确要沿用上一个用例的会话）；
+        - 只作用于**声明了 `reset_session` 的工具**（目前是浏览器）：ssh / mysql 的
+          连接不携带跨用例的身份语义，重建反而白白多花时间。
+        """
+        if not bool(self.config.runner_default("isolate_case_session", True)):
+            return
+        if bool(case.get("reuse_session")):
+            result.warnings.append(
+                "用例声明 reuse_session: true，沿用上一个用例的会话（本用例未做隔离）"
+            )
+            return
+
+        for name in self._active_adapter_names():
+            try:
+                adapter = self.registry.get(name)
+            except MtpError:
+                continue
+            reset = getattr(adapter, "reset_session", None)
+            if not callable(reset):
+                continue
+            try:
+                self._invoke_adapter(name, reset)
+            except Exception as exc:  # noqa: BLE001 - 隔离失败只告警，不能拦住用例
+                result.warnings.append(f"{name} 会话隔离失败: {exc}")
+
+    def _active_adapter_names(self) -> list[str]:
+        """注册表里已实例化的工具名；注册表没实现该能力时按「无」处理。"""
+        names = getattr(self.registry, "active_names", None)
+        if not callable(names):
+            return []
+        try:
+            return list(names())
+        except Exception:  # noqa: BLE001 - 探测失败不该影响用例执行
+            return []
+
     def __enter__(self) -> "TestRunner":
         return self
 
@@ -172,6 +219,7 @@ class TestRunner:
         acquired: list[str] = []
 
         try:
+            self._isolate_sessions(case, result)
             for phase in PHASE_ORDER:
                 steps = list(case.get(phase) or [])
                 if phase == "fixtures":

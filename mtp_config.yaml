@@ -91,4 +91,13 @@ evidence:
   root: artifacts            # 产物/证据根目录（可用 MTP_ARTIFACT_ROOT 覆盖）
   retention_days: 14
 
-runner: {}                   # 步骤超时 / 重试等默认值
+runner:
+  # 用例级会话隔离：每个用例开始前重建浏览器会话，用例之间不继承 cookie、缓存与
+  # 页面状态。一次任务里所有用例共用同一个浏览器进程，不隔离的话「用例 A 登录过」
+  # 会让「用例 B 的打开页面」直接落到已登录页 —— B 里那段登录/UKey 路径就没被检验，
+  # 而且 B 单独跑时行为不一样。默认 true；确实要复用会话的用例可写 reuse_session: true。
+  isolate_case_session: true
+  # 单步超时（秒）；用例/步骤可用 timeout_sec 覆盖
+  # default_step_timeout_sec: 30
+  # 步骤失败最多重试几次；用例/步骤可用 retry 覆盖
+  # max_retry: 5

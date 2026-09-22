@@ -25,6 +25,15 @@ class ToolRegistry(Protocol):
         """该工具是否已经注册或实例化。"""
         ...
 
+    def active_names(self) -> list[str]:
+        """已经实例化的工具名。
+
+        **可选能力**：引擎用它找出「有会话状态的工具」，在用例之间做会话隔离
+        （只对声明了 `reset_session` 的工具生效）。引擎用 `getattr` 探测，
+        未实现时退化为「不隔离」，因此老注册表与测试替身不必实现它。
+        """
+        ...
+
     def close_all(self) -> None:
         """释放所有工具持有的连接/进程。"""
         ...
