@@ -9,6 +9,8 @@ from typing import Any
 
 from mtp_contracts.results import now_iso
 
+from . import json_safe
+
 TERMINAL_STATES = {"passed", "failed", "error", "cancelled"}
 
 
@@ -91,8 +93,8 @@ class RunRepository:
                 (
                     run_id,
                     now_iso(),
-                    json.dumps(uploads, ensure_ascii=False),
-                    json.dumps(options, ensure_ascii=False),
+                    json_safe.dumps(uploads),
+                    json_safe.dumps(options),
                     len(uploads),
                 ),
             )

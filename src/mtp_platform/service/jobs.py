@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import queue
 import shutil
+import sys
 import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -14,6 +15,7 @@ from mtp_contracts.redaction import redact, registry_for_cases
 from mtp_contracts.results import CaseResult, StepResult, now_iso
 
 from .executor import RunExecutor, RunRequest, summarize
+from . import json_safe
 from .repository import TERMINAL_STATES, RunRepository
 
 # 详情里单条字符串的上限。轮询型步骤（guard/poll）的 stdout 动辄上万字符，
@@ -166,7 +168,7 @@ def _case_details(results: list[CaseResult]) -> dict[str, dict[str, Any]]:
             "error": _clip(result.error),
             "evidence": _attach_evidence_urls(result.run_id, result.evidence),
         }
-        if len(json.dumps(detail, ensure_ascii=False)) > DETAIL_CASE_LIMIT:
+        if len(json_safe.dumps(detail)) > DETAIL_CASE_LIMIT:
             for step in detail["steps"]:
                 step["data"] = {"truncated": True}
             detail["truncated"] = True
@@ -294,7 +296,7 @@ class JobManager:
                 run_id,
                 status="cancelled",
                 finished_at=now_iso(),
-                summary_json=json.dumps({"passed": 0, "failed": 0, "error": 0, "cancelled": 1}),
+                summary_json=json_safe.dumps({"passed": 0, "failed": 0, "error": 0, "cancelled": 1}),
             )
             return True
         with self._lock:
@@ -333,15 +335,24 @@ class JobManager:
 
             def progress(result: CaseResult, done: int, _total: int) -> None:
                 results.append(result)
-                self.repository.update(
-                    run_id,
-                    cases_done=done,
-                    cases_json=json.dumps(scrub([_case_result(item) for item in results]), ensure_ascii=False),
-                    summary_json=json.dumps(summarize(results, cancelled=False), ensure_ascii=False),
-                    first_failure_json=json.dumps(scrub(_first_failure(results)), ensure_ascii=False),
-                    evidence_json=json.dumps(scrub(_evidence(results)), ensure_ascii=False),
-                    case_details_json=json.dumps(scrub(_case_details(results)), ensure_ascii=False),
-                )
+                try:
+                    self.repository.update(
+                        run_id,
+                        cases_done=done,
+                        cases_json=json_safe.dumps(scrub([_case_result(item) for item in results])),
+                        summary_json=json_safe.dumps(summarize(results, cancelled=False)),
+                        first_failure_json=json_safe.dumps(scrub(_first_failure(results))),
+                        evidence_json=json_safe.dumps(scrub(_evidence(results))),
+                        case_details_json=json_safe.dumps(scrub(_case_details(results))),
+                    )
+                except Exception as exc:  # noqa: BLE001 - 进度写失败不能带走整个任务
+                    # 这一步以前是硬失败：某个工具返回了不可序列化的值，异常冒到任务边界，
+                    # 整个任务变 error、后面的用例全都不跑（2026-09-23 实测）。现在只记一条，
+                    # 用例全部跑完后那次最终 update 会把完整结果再写一遍。
+                    print(
+                        f"[warn] {run_id} 进度写入失败（不影响继续执行）: {type(exc).__name__}: {exc}",
+                        file=sys.stderr,
+                    )
 
             outcome = RunExecutor().execute(
                 RunRequest(
@@ -367,11 +378,11 @@ class JobManager:
                 status=status,
                 finished_at=now_iso(),
                 cases_done=len(outcome.results),
-                cases_json=json.dumps(scrub([_case_result(item) for item in outcome.results]), ensure_ascii=False),
-                summary_json=json.dumps(outcome.summary, ensure_ascii=False),
-                first_failure_json=json.dumps(scrub(_first_failure(outcome.results)), ensure_ascii=False),
-                evidence_json=json.dumps(scrub(_evidence(outcome.results)), ensure_ascii=False),
-                case_details_json=json.dumps(scrub(_case_details(outcome.results)), ensure_ascii=False),
+                cases_json=json_safe.dumps(scrub([_case_result(item) for item in outcome.results])),
+                summary_json=json_safe.dumps(outcome.summary),
+                first_failure_json=json_safe.dumps(scrub(_first_failure(outcome.results))),
+                evidence_json=json_safe.dumps(scrub(_evidence(outcome.results))),
+                case_details_json=json_safe.dumps(scrub(_case_details(outcome.results))),
             )
         except Exception as exc:  # noqa: BLE001 - job boundary must persist failure
             message = f"{type(exc).__name__}: {exc}"
@@ -382,9 +393,8 @@ class JobManager:
                 status="error",
                 finished_at=now_iso(),
                 error=message,
-                first_failure_json=json.dumps(
+                first_failure_json=json_safe.dumps(
                     {"case_id": None, "step_id": None, "message": message},
-                    ensure_ascii=False,
                 ),
             )
         finally:

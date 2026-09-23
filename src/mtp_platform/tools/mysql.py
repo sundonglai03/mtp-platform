@@ -15,8 +15,10 @@
 
 from __future__ import annotations
 
+import datetime as dt  # 不写 `from datetime import time` —— 会遮蔽同名的 `import time`
 import fnmatch
 import time
+from decimal import Decimal
 from typing import Any, Iterable
 
 from mtp_contracts.adapters import ActionResult, StepContext
@@ -47,6 +49,38 @@ _WRITE_ACTIONS = {"insert", "update", "delete"}
 
 # 标识符白名单（表名/列名只允许这种形态，再拼进 SQL —— 值一律走参数绑定）
 _IDENT_RE = __import__("re").compile(r"^[A-Za-z_][A-Za-z0-9_$]*$")
+
+
+def _json_safe(value: Any) -> Any:
+    """把数据库取出的值归一化成 JSON 原生类型。
+
+    驱动会把时间列给成 `datetime`、聚合列给成 `Decimal`、BLOB 给成 `bytes` —— 这些
+    直接进步骤数据后，既会让断言不好写（拿 datetime 比字符串永远不等），也会让结果
+    落库时的 `json.dumps` 抛 `TypeError` 并终止整个任务（2026-09-23 实测）。
+
+    约定（写断言时按这个来）：
+    - datetime / date / time / timedelta → ISO 字符串（如 "2026-09-23T11:39:07"）
+    - Decimal → int 或 float
+    - bytes / bytearray → utf-8 文本，不行就退化成 repr
+    """
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, (dt.datetime, dt.date, dt.time)):
+        return value.isoformat()
+    if isinstance(value, dt.timedelta):
+        return str(value)
+    if isinstance(value, Decimal):
+        return int(value) if value == value.to_integral_value() else float(value)
+    if isinstance(value, (bytes, bytearray)):
+        try:
+            return bytes(value).decode("utf-8")
+        except UnicodeDecodeError:
+            return repr(bytes(value))
+    return str(value)
 
 
 def _quote_ident(name: Any) -> str:
@@ -193,7 +227,7 @@ class MysqlTool(BaseTool):
             if action == "describe":
                 table = _quote_ident(args.get("table_name"))
                 cur.execute(f"DESCRIBE {table}")
-                return {"columns": cur.fetchall()}
+                return {"columns": _json_safe(cur.fetchall())}
 
             if action == "count":
                 table = _quote_ident(args.get("table_name"))
@@ -208,7 +242,7 @@ class MysqlTool(BaseTool):
                 order = f" ORDER BY {_quote_ident(args['order_by'])}" if args.get("order_by") else ""
                 cur.execute(f"SELECT * FROM {table}{where}{order} LIMIT %s", [*params, limit])
                 rows = cur.fetchall()
-                return {"rows": rows, "row_count": len(rows)}
+                return {"rows": _json_safe(rows), "row_count": len(rows)}
 
             # query：只读 SQL。写语句必须走 insert/update/delete（那三个才有同意与行数闸门）
             sql = str(args.get("sql") or "").strip()
@@ -222,7 +256,7 @@ class MysqlTool(BaseTool):
                 )
             cur.execute(sql, args.get("where_params") or None)
             rows = cur.fetchall()
-            return {"rows": rows, "row_count": len(rows)}
+            return {"rows": _json_safe(rows), "row_count": len(rows)}
 
     # -- 写（事务内核对影响行数）-------------------------------------------
     def _write(self, conn: Any, action: str, args: dict[str, Any]) -> dict[str, Any]:
