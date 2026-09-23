@@ -577,3 +577,39 @@ def test_unexpected_success_fails_negative_case(config):
 
     assert result.status == RunState.FAILED
     assert result.steps[0].error["code"] == "unexpected_success"
+
+
+class DeclaredTimeoutAdapter(RecordingAdapter):
+    """声明了内部超时的假适配器。
+
+    真实场景：SSH 轮询步骤写 `"timeout": 240`（远端命令最多跑 240s 等证书落地），
+    而引擎默认单步上限 30s。以前两层各算各的，这类步骤必被误杀。
+    """
+
+    def declared_timeout_sec(self, action, args):
+        return 1.0
+
+
+def test_declared_adapter_timeout_extends_watchdog(config):
+    """适配器声明了内部超时，看门狗就必须让到它之后（否则轮询步骤必被误杀）。
+
+    注意看门狗实际是 `timeout_sec + step_timeout_grace_sec(默认 1.0s)`：适配器跑 2s，
+    而用例只给 0.5s（1.5s 就会砍），只有让到「声明值 + 余量」才可能通过。
+    """
+    adapter = DeclaredTimeoutAdapter(script=[{"sleep": 2.0}])
+    case = case_with(steps=[{"id": "poll", "action": "recorder.do", "args": {}, "timeout_sec": 0.5}])
+
+    result = run(config, {"recorder": adapter}, case)
+
+    assert result.steps[0].status.value == "passed"
+    assert result.steps[0].duration_ms >= 2000
+
+
+def test_watchdog_still_kills_steps_without_declaration(config):
+    """没有声明内部超时的适配器，单步超时照旧生效（不因这次改动而放松）。"""
+    adapter = RecordingAdapter(script=[{"sleep": 2.0}])
+    case = case_with(steps=[{"id": "slow", "action": "recorder.do", "args": {}, "timeout_sec": 0.2}])
+
+    result = run(config, {"recorder": adapter}, case)
+
+    assert result.steps[0].error["code"] == "timeout"

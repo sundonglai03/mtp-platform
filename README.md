@@ -87,6 +87,27 @@ GET  /api/runs/{run_id}/evidence/{path}
 - 单个用例明确要复用上一个用例的会话：用例里写 `"reuse_session": true`（结果里会记一条告警，便于回看）
 - 隔离失败只告警、不打断用例；浏览器进程掉线时退化成完整重建
 
+## 两层超时（用例写的 timeout 与单步看门狗）
+
+用例里的 `args.timeout` 是**工具自己的**超时（ssh / mysql 按**秒**、playwright 按**毫秒**，与各自底层库一致），平台的单步看门狗默认 30s。两者以前各算各的：用例写 `"timeout": 240`（想让 SSH 轮询等到证书落地），30s 就被看门狗砍掉，报出来的是「步骤超时（30.0s）」——完全指不到真正原因。
+
+现在引擎取「用例声明」（步骤 `timeout_sec` → 用例 `timeout_sec` → `runner.default_step_timeout_sec`）与「适配器声明的内部超时 + 5s 余量」的**较大值**：
+
+- 工具只要实现 `declared_timeout_sec(action, args)`（返回**秒**）即可，ssh / mysql / playwright 已实现；老工具不实现也没关系（按 0 处理，等价旧行为）。
+- 因此写用例时**只需把工具自己的超时写对**，不必再为了绕开看门狗额外加步骤级 `timeout_sec`。
+
+## 选择器写错时，报错里会带页面真实 DOM
+
+playwright 步骤超时（选择器没命中）时，错误详情不再只有 `Timeout 15000ms exceeded`，而是直接列出页面上的候选元素与建议选择器：
+
+```
+原选择器命中 0 个元素：button:has-text('登录')
+页面上含文本「登录」的可见元素（建议改用 text=登录）：
+  - input#submi  "登录"
+```
+
+意义在于：agent 看不到被测页面，人也不想手动去翻 DOM。契约层（`mtp-contracts-core`）对 `button:has-text('文字')` 这类「元素类型 + 文本」混写选择器会给出 `fragile_target` 忠告，建议改用 `text=文字`（Playwright 的文本选择器同时匹配 `<button>`、`<span>` 与 `<input type=button value=...>`）。
+
 ## 环境变量
 
 | 变量 | 说明 |

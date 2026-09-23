@@ -233,3 +233,58 @@ def test_close_releases_session(config, fake_pw):
     tool.execute("navigate", {"url": "http://x/"}, _ctx())
     tool.close()
     assert fake_pw.stopped is True
+
+
+# ---------------------------------------------------------------------------
+# 两层超时：写对「工具自己的超时」，引擎的看门狗必须让到它之后
+# ---------------------------------------------------------------------------
+def test_declared_timeout_sec_converts_ms_to_seconds(config):
+    """playwright 的 args.timeout 是毫秒，声明给引擎时必须换算成秒。"""
+    tool = PlaywrightTool(config)
+    assert tool.declared_timeout_sec("click", {}) == 15.0
+    assert tool.declared_timeout_sec("click", {"timeout": 45000}) == 45.0
+    assert tool.declared_timeout_sec("navigate", {}) == 30.0
+    assert tool.declared_timeout_sec("wait_for", {"time": 240}) == 240.0
+
+
+def test_text_hint_extraction():
+    assert pw_module._text_hint("button:has-text('登录')") == "登录"
+    assert pw_module._text_hint(':text("跳过")') == "跳过"
+    assert pw_module._text_hint("text=证书申请") == "证书申请"
+    assert pw_module._text_hint("#username") == ""
+
+
+def test_click_timeout_reports_what_is_really_on_the_page(config):
+    """超时错误必须带上「页面真实 DOM」，否则 agent 与人都只能对着 15s 空等猜。
+
+    这条对应真实事故：登录页的按钮是 `<input type=button value=登录>`，用例写的是
+    `button:has-text('登录')`（页面上一个 button 都没有），白等 15s 后报的还是
+    `Page.click: Timeout 15000ms exceeded.`——看不出该改成什么。
+    """
+    from playwright.sync_api import TimeoutError as PWTimeout
+
+    class _Locator:
+        def count(self) -> int:
+            return 0
+
+    class _Page:
+        url = "http://192.168.14.131:22001/isc_sso/login"
+
+        def locator(self, selector):
+            return _Locator()
+
+        def evaluate(self, expression, arg):
+            return ['input#submi.Submit  "登录"']
+
+        def click(self, selector, timeout=None):
+            raise PWTimeout("Page.click: Timeout 15000ms exceeded.")
+
+    tool = PlaywrightTool(config)
+    tool._page = _Page()  # 直接给一个页面替身，不启动浏览器
+
+    result = tool.execute("click", {"target": "button:has-text('登录')"}, _ctx())
+
+    assert not result.ok
+    assert result.error.code == "timeout"
+    assert "input#submi" in result.error.detail
+    assert "text=登录" in result.error.detail

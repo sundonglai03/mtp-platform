@@ -77,3 +77,14 @@ class BaseTool:
         调用发生在工具自己的线程上（playwright 的线程亲和性由引擎保证）。
         """
         return None
+
+    def declared_timeout_sec(self, action: str, args: dict[str, Any]) -> float | None:
+        """本步在**适配器内部**还会等多久（秒）；默认无内部超时。
+
+        适配器的 `args.timeout`（ssh 是秒、playwright 是毫秒）与引擎的**单步看门狗**
+        是两层超时。以前两层各算各的：用例写 `timeout: 240`（想让 SSH 轮询等到证书
+        落地），引擎的默认 30s 却先把这一步砍了，报出来的是「步骤超时（30.0s）」，
+        完全指不到真正原因。声明之后引擎会取两者的较大值，用例只要把工具自己的超时
+        写对即可。单位由各工具自行换算——**必须**返回秒。
+        """
+        return None

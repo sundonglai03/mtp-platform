@@ -18,17 +18,20 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import time
 from typing import Any
 
 from mtp_contracts.adapters import ActionResult, StepContext
-from mtp_contracts.errors import ConfigError, ToolExecutionError
+from mtp_contracts.errors import ConfigError, TimeoutError_, ToolExecutionError
 from .base import BaseTool
 
 try:  # 未安装 playwright 时给出明确提示
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
     from playwright.sync_api import sync_playwright
 except ImportError:  # pragma: no cover
     sync_playwright = None  # type: ignore[assignment]
+    PlaywrightTimeoutError = TimeoutError  # type: ignore[assignment,misc]
 
 # 只列出**已实现**的 action；未实现的宁可直接报错，也不静默当作通过。
 _ACTIONS: dict[str, str] = {
@@ -157,6 +160,52 @@ class PlaywrightTool(BaseTool):
         self._console.clear()
         self._requests.clear()
 
+    def declared_timeout_sec(self, action: str, args: dict[str, Any]) -> float | None:
+        """本步在 chromium 侧最多等多久（秒）。
+
+        playwright 的 `args.timeout` 是**毫秒**（与 playwright API 一致），这里换算成秒
+        交给引擎；`wait_for` 的固定睡眠（`time` 是秒）也算进去。引擎取它与用例声明的
+        较大值，避免「用例要等 240s、引擎 30s 就砍掉」这种两层超时打架。
+        """
+        if action == "wait_for" and args.get("time") is not None:
+            return float(args["time"])
+        return _ms(args, "timeout", 30000 if action == "navigate" else 15000) / 1000.0
+
+    def _timeout_diagnosis(self, action: str, args: dict[str, Any]) -> str:
+        """超时时告诉用例作者「页面上到底有什么」。
+
+        光有 `Timeout 15000ms exceeded` 谁都改不动：agent 看不到 DOM，人得手动去翻页面。
+        这里把候选元素与可直接粘贴的选择器写进错误详情，通常一次就能改对。
+        """
+        try:
+            page = self._page
+            if page is None:
+                return "浏览器页面不可用，无法给出候选元素"
+            target = str(args.get("target") or args.get("selector") or "")
+            hint = _text_hint(target)
+            hits: int | None = None
+            if target:
+                try:
+                    hits = page.locator(target).count()
+                except Exception:  # noqa: BLE001 - 选择器本身非法
+                    hits = None
+            lines = [
+                f"原选择器命中 {hits} 个元素：{target}" if hits is not None else f"原选择器无法解析：{target}"
+            ]
+            candidates = _visible_candidates(page, hint)
+            if candidates:
+                lines.append(
+                    f"页面上含文本「{hint}」的可见元素（建议改用 text={hint}）："
+                    if hint
+                    else "页面上可见的可点元素："
+                )
+                lines.extend(f"  - {item}" for item in candidates)
+            else:
+                lines.append("页面上没有找到可见的可点元素（可能还没渲染完，或目标在 iframe 里）")
+            return "\n".join(lines)
+        except Exception as exc:  # noqa: BLE001 - 诊断失败不能盖住原本的超时
+            return f"（诊断信息生成失败：{type(exc).__name__}: {exc}）"
+
     # -- 执行 ---------------------------------------------------------------
     def do_execute(self, action: str, args: dict[str, Any], context: StepContext) -> ActionResult:
         args = self._normalize(args)
@@ -165,7 +214,21 @@ class PlaywrightTool(BaseTool):
         if handler is None:  # pragma: no cover - execute() 已挡未实现的 action
             raise ToolExecutionError(f"playwright 未实现 action: {action}", adapter=self.name, action=action)
 
-        data = handler(args) or {}
+        try:
+            data = handler(args) or {}
+        except PlaywrightTimeoutError as exc:
+            # 保留 code=timeout（引擎与看板按它分类），同时把「页面上有什么」放进 detail，
+            # 让 agent 或人能一次改对选择器，而不是对着 15s 空等猜。
+            return ActionResult.failure(
+                action,
+                TimeoutError_(
+                    f"playwright.{action} 超时：{str(exc).splitlines()[0]}",
+                    adapter=self.name,
+                    action=action,
+                    detail=self._timeout_diagnosis(action, args),
+                ),
+                adapter=self.name,
+            )
         raw = data.pop("_raw", [])
         elapsed_ms = int((time.monotonic() - started) * 1000)
         data.setdefault("duration_ms", elapsed_ms)
@@ -302,6 +365,56 @@ class PlaywrightTool(BaseTool):
     def _do_close(self, args: dict[str, Any]) -> dict[str, Any]:
         self.close()
         return {"text": "browser closed"}
+
+
+_HAS_TEXT = re.compile(r"(?:has-text|:text)\s*\(\s*(['\"])(.*?)\1\s*\)")
+_TEXT_EQUALS = re.compile(r"^\s*text\s*=\s*(.+)$", re.S)
+
+
+def _text_hint(target: str) -> str:
+    """从选择器里抽出「人类写下的那段文本」。
+
+    用于超时诊断：知道作者想点什么，才能把页面上的真实候选找出来。
+    """
+    match = _HAS_TEXT.search(target or "")
+    if match:
+        return match.group(2).strip()
+    match = _TEXT_EQUALS.match(target or "")
+    if match:
+        value = match.group(1).strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+            value = value[1:-1]
+        return value.strip()
+    return ""
+
+
+_JS_CANDIDATES = """([hint, limit]) => {
+  const visible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+  const out = [];
+  const nodes = document.querySelectorAll('button, a, input, span, li, label, div[role="button"]');
+  for (const el of nodes) {
+    const text = ((el.innerText || '') + ' ' + (el.value || '')).replace(/\\s+/g, ' ').trim();
+    if (!text || text.length > 40) continue;
+    if (hint && text.indexOf(hint) < 0) continue;
+    if (!visible(el)) continue;
+    const id = el.id ? '#' + el.id : '';
+    const cls = (el.className && typeof el.className === 'string')
+      ? '.' + el.className.trim().split(/\\s+/).slice(0, 2).join('.')
+      : '';
+    out.push(el.tagName.toLowerCase() + id + cls + '  "' + text.slice(0, 24) + '"');
+    if (out.length >= limit) break;
+  }
+  return out;
+}"""
+
+
+def _visible_candidates(page: Any, hint: str, limit: int = 8) -> list[str]:
+    """列出可见候选元素（有文本提示时按文本过滤），把 DOM 事实交给用例作者。"""
+    try:
+        result = page.evaluate(_JS_CANDIDATES, [hint, limit])
+    except Exception:  # noqa: BLE001 - 诊断失败不影响主流程
+        return []
+    return [str(item) for item in (result or [])]
 
 
 def _target(args: dict[str, Any]) -> str:

@@ -470,6 +470,11 @@ class TestRunner:
                 break
 
             adapter_name, _, act = action.partition(".")
+            # 适配器内部还有一层超时（ssh/mysql 的 args.timeout 是秒、playwright 是毫秒）。
+            # 用例写 `timeout: 240` 表达的是「这一步我要等这么久」，看门狗必须让到那之后；
+            # 否则轮询步骤会被 30s 默认值先砍掉，报出来的是「步骤超时（30.0s）」，
+            # 完全指不到真正原因（实测 cert-05/08/09 就是这么被误杀的）。
+            timeout_sec = max(timeout_sec, self._adapter_declared_timeout(adapter_name, act, args))
             step_ctx = StepContext(
                 run_id=run_id,
                 case_id=str(case.get("id", "")),
@@ -539,6 +544,30 @@ class TestRunner:
 
         record.evidence = [r.to_dict() for r in store.refs_for(case_id=str(case.get("id")), step_id=step_id)]
         return record
+
+    # 适配器超时与看门狗之间的余量：适配器自己超时后还要收尾（关闭 channel、
+    # 组装错误），贴太紧会被看门狗抢在前面，报成「步骤超时」而不是工具自己的报错。
+    _ADAPTER_TIMEOUT_MARGIN_SEC = 5.0
+
+    def _adapter_declared_timeout(self, adapter_name: str, action: str, args: dict[str, Any]) -> float:
+        """适配器声明的内部超时（秒）；探测不到就按 0 处理（等价于旧行为）。
+
+        只认**显式实现**了 `declared_timeout_sec` 的工具：老工具与测试替身不必实现。
+        """
+        try:
+            adapter = self.registry.get(adapter_name)
+        except MtpError:
+            return 0.0
+        declared = getattr(adapter, "declared_timeout_sec", None)
+        if not callable(declared):
+            return 0.0
+        try:
+            value = declared(action, args)
+            if value is None:
+                return 0.0
+            return max(0.0, float(value)) + self._ADAPTER_TIMEOUT_MARGIN_SEC
+        except Exception:  # noqa: BLE001 - 探测失败不该影响用例执行
+            return 0.0
 
     def _call_adapter(
         self,

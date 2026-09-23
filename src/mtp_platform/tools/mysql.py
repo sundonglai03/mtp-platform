@@ -96,6 +96,16 @@ class MysqlTool(BaseTool):
     def actions(self) -> dict[str, str]:
         return dict(_ACTIONS)
 
+    def declared_timeout_sec(self, action: str, args: dict[str, Any]) -> float | None:
+        """SQL 读写自己的超时（秒）：取凭证里的 `read_timeout`（默认 30）。
+
+        慢查询/大结果集可以在凭证里调大它，引擎会同步把单步看门狗放行到之后。
+        """
+        credentials = args.get("credentials")
+        if isinstance(credentials, dict):
+            return float(credentials.get("read_timeout", 30))
+        return None
+
     # -- 策略（复用基线逻辑）-----------------------------------------------
     def _credentials(self, args: dict[str, Any], context: StepContext) -> dict[str, Any]:
         creds = args.get("credentials")

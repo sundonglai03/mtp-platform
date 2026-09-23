@@ -55,6 +55,16 @@ class SshTool(BaseTool):
     def actions(self) -> dict[str, str]:
         return dict(_ACTIONS)
 
+    def declared_timeout_sec(self, action: str, args: dict[str, Any]) -> float | None:
+        """SSH 命令自己的超时（秒），默认与 `_run_command` 保持一致。
+
+        用例里 `"timeout": 240` 是「远端命令最多跑 240 秒」（常见于等证书落地这类轮询），
+        引擎据此把单步看门狗放行到 240s 之后，不再被默认 30s 误杀。
+        """
+        if args.get("timeout") is None:
+            return None
+        return float(args["timeout"])
+
     # -- 白名单（复用基线逻辑）---------------------------------------------
     def _assert_host_allowed(self, host: str | None, allow_any: bool) -> None:
         if not host:
