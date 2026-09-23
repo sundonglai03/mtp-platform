@@ -27,10 +27,12 @@ from mtp_contracts.errors import ConfigError, TimeoutError_, ToolExecutionError
 from .base import BaseTool
 
 try:  # 未安装 playwright 时给出明确提示
+    from playwright.sync_api import Error as PlaywrightError
     from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
     from playwright.sync_api import sync_playwright
 except ImportError:  # pragma: no cover
     sync_playwright = None  # type: ignore[assignment]
+    PlaywrightError = Exception  # type: ignore[assignment,misc]
     PlaywrightTimeoutError = TimeoutError  # type: ignore[assignment,misc]
 
 # 只列出**已实现**的 action；未实现的宁可直接报错，也不静默当作通过。
@@ -349,7 +351,19 @@ class PlaywrightTool(BaseTool):
         expression = args.get("function") or args.get("expression")
         if not expression:
             raise ConfigError("playwright evaluate 缺少 function/expression", adapter=self.name)
-        value = self._page_obj().evaluate(str(expression))
+        page = self._page_obj()
+        try:
+            value = page.evaluate(str(expression))
+        except PlaywrightError as exc:
+            # 只重试本套件的「有 UKey 门禁就跳过」检查。任意 evaluate 可能已
+            # 提交表单等操作，导航后盲目重跑会造成重复提交。
+            optional_ukey_skip = "跳过" in str(expression) and "return 'not-present'" in str(expression)
+            if "Execution context was destroyed" not in str(exc) or not optional_ukey_skip:
+                raise
+            # 登录按钮可能先返回，再异步跳转到主页面。此时 evaluate 已进入旧文档，
+            # 导航会销毁它的 JS 上下文；等新文档就绪后重试一次可重复的检查。
+            page.wait_for_load_state("domcontentloaded", timeout=5000)
+            value = page.evaluate(str(expression))
         return {"json": value, "text": json.dumps(value, ensure_ascii=False, default=str)}
 
     def _do_console_messages(self, args: dict[str, Any]) -> dict[str, Any]:
