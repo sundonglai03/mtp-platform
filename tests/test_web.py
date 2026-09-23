@@ -393,6 +393,19 @@ def test_repository_adds_case_detail_column_to_existing_database(tmp_path):
     assert repository.get("legacy")["case_details"] == {"C-1": {"case_id": "C-1"}}
 
 
+def test_repository_purges_only_expired_terminal_runs(tmp_path):
+    repository = RunRepository(tmp_path / "runs.db")
+    repository.create(run_id="old", uploads=[], options={})
+    repository.update("old", status="passed", finished_at="2000-01-01T00:00:00+00:00")
+    repository.create(run_id="queued", uploads=[], options={})
+
+    removed = repository.purge_finished_before("2026-01-01T00:00:00+00:00")
+
+    assert removed == ["old"]
+    assert repository.get("old") is None
+    assert repository.get("queued")["status"] == "queued"
+
+
 @pytest.mark.skipif(shutil.which("docker") is None, reason="Docker CLI is not installed")
 def test_docker_compose_config_is_valid():
     result = subprocess.run(

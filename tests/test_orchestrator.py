@@ -97,6 +97,7 @@ class ThreadBoundPlaywrightAdapter:
             "click": "click",
             "screenshot": "screenshot",
             "snapshot": "snapshot",
+            "wait_for": "wait_for",
             "evaluate": "evaluate",
         }
 
@@ -123,6 +124,8 @@ class ThreadBoundPlaywrightAdapter:
             )
         if action == "snapshot":
             data = {"page_text": "页面正常", "text": "页面正常"}
+        elif action == "wait_for":
+            data = {"target": args.get("target")}
         elif action == "evaluate":
             data = {"json": {"visible": True}}
         else:
@@ -216,7 +219,7 @@ def test_successful_case_passes(config):
 
 
 # ---------------------------------------------------------------------------
-# 证据策略：只采截图（能截图的截一张，截不了的不留文字）
+# 证据策略：浏览器步骤可采截图和文本快照
 # ---------------------------------------------------------------------------
 def test_non_browser_step_does_not_store_evidence(config):
     """ssh / mysql 这类截不了图的步骤不再落 stdout/stderr 文本证据。"""
@@ -236,8 +239,8 @@ def test_non_browser_step_does_not_store_evidence(config):
     assert result.evidence == []
 
 
-def test_browser_step_only_collects_a_screenshot(config):
-    """声明 snapshot / console / network 也只截一张 PNG，不落文本。"""
+def test_browser_step_collects_only_requested_supported_evidence(config):
+    """声明 snapshot 会保存文本，console / network 不会产生伪证据。"""
     adapter = ThreadBoundPlaywrightAdapter()
     case = case_with(
         steps=[
@@ -252,12 +255,12 @@ def test_browser_step_only_collects_a_screenshot(config):
     result = run(config, {"playwright": adapter}, case)
 
     assert result.status == RunState.PASSED
-    assert adapter.actions_seen.count("screenshot") == 1
-    assert "snapshot" not in adapter.actions_seen
+    assert adapter.actions_seen.count("screenshot") == 0
+    assert adapter.actions_seen.count("snapshot") == 1
     assert "console_messages" not in adapter.actions_seen
     assert "network_requests" not in adapter.actions_seen
-    assert [item["kind"] for item in result.evidence] == ["screenshot"]
-    assert result.evidence[0]["path"].endswith("screenshot.png")
+    assert [item["kind"] for item in result.evidence] == ["snapshot"]
+    assert result.evidence[0]["path"].endswith("snapshot.txt")
 
 
 def test_browser_step_without_declared_evidence_collects_nothing(config):
@@ -303,11 +306,11 @@ def test_playwright_steps_evidence_probes_and_close_stay_on_one_thread(config):
     assert adapter.closed is True
     assert adapter.owner_thread is not None
     assert adapter.actions_seen.count("screenshot") == 2
-    assert adapter.actions_seen.count("snapshot") == 0
-    assert "evaluate" in adapter.actions_seen
-    # 声明的截图 + 失败自动补的截图
+    assert adapter.actions_seen.count("snapshot") == 2
+    assert "wait_for" in adapter.actions_seen
+    # 声明的截图/快照 + 失败自动补的截图/快照
     names = sorted(item["path"].rsplit("/", 1)[-1] for item in result.evidence)
-    assert names == ["failure-click.png", "screenshot.png"]
+    assert names == ["failure-click.png", "failure-click.txt", "screenshot.png", "snapshot.txt"]
 
 
 def test_failed_assertion_marks_case_failed(config):

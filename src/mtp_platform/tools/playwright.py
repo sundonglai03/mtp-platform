@@ -8,11 +8,10 @@
 
 引擎对本工具的契约（必须满足，否则断言/证据会退化）：
 - `snapshot` → `data["page_text"]`（页面可见文本）与 `data["text"]`（可读快照）；
-- `evaluate` → `data["json"]`（求值结果，`element_visible` 断言依赖它）；
+- `wait_for` → 等待 Playwright 原生定位器可见（`element_visible` 断言依赖它）；
 - `screenshot` → `raw=[{"type": "image", "_base64": ...}]`（证据层据此落盘图片）。
 
-安全：`evaluate` / `run_code_unsafe` 属高危，用例必须显式 `allow_js: true`；
-平台内部的可见性探针走 `do_execute`，不受此限。
+安全：`evaluate` / `run_code_unsafe` 属高危，用例必须显式 `allow_js: true`。
 """
 
 from __future__ import annotations

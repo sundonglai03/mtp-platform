@@ -200,10 +200,11 @@ class SshTool(BaseTool):
             sftp = client.open_sftp()
             try:
                 if upload:
-                    local = Path(str(args.get("local_path") or args.get("local_dir") or ""))
+                    raw_local = args.get("local_path") or args.get("local_dir")
                     remote = str(args.get("remote_path") or "")
-                    if not local or not remote:
+                    if not raw_local or not remote:
                         raise ConfigError("ssh upload 需要 local_path 与 remote_path", adapter=self.name)
+                    local = Path(str(raw_local))
                     if local.is_dir():
                         self._put_dir(sftp, local, remote)
                         summary = f"{host} 上传目录 {local} -> {remote}"

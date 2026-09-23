@@ -229,9 +229,11 @@ def create_app(*, config_path: str | None = None) -> FastAPI:
         )
 
     config_errors: list[str] = []
+    retention_days = 14
     try:
         config = load_config(config_path)
         artifacts_root = config.artifact_root().resolve()
+        retention_days = max(1, int(config.evidence.get("retention_days", 14)))
     except Exception as exc:  # noqa: BLE001 - expose deployment errors through HTTP
         config_errors.append(f"{type(exc).__name__}: {exc}")
         artifacts_root = Path(os.environ.get("MTP_ARTIFACT_ROOT", "artifacts")).resolve()
@@ -253,6 +255,7 @@ def create_app(*, config_path: str | None = None) -> FastAPI:
         artifacts_root=artifacts_root,
         config_path=config_path,
         max_workers=max_workers,
+        retention_days=retention_days,
     )
 
     @asynccontextmanager

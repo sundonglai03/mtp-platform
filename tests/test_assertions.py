@@ -47,6 +47,17 @@ def test_contains_string_and_list(engine):
     assert not evaluate(engine, {"id": "a", "type": "contains", "actual": "hello", "expected": "zzz"}).passed
 
 
+def test_contains_dict_checks_keys_instead_of_rendered_values(engine):
+    assert evaluate(
+        engine,
+        {"id": "a", "type": "contains", "actual": {"admin": "yes"}, "expected": "admin"},
+    ).passed
+    assert not evaluate(
+        engine,
+        {"id": "a", "type": "contains", "actual": {"role": "admin"}, "expected": "admin"},
+    ).passed
+
+
 def test_status_code_reads_step_scalar(engine):
     context = {"steps": {"call": {"http_status": 200, "ok": True}}}
     result = evaluate(
@@ -164,12 +175,12 @@ def test_page_text_contains_falls_back_to_probe():
 
 def test_element_visible_uses_probe():
     def probe(action, args):
-        assert action == "playwright.evaluate"
-        assert "#logout" in args["function"]
-        return {"ok": True, "data": {"json": {"visible": True, "reason": "ok"}}, "error": None}
+        assert action == "playwright.wait_for"
+        assert args["target"] == "text=退出"
+        return {"ok": True, "data": {"target": "text=退出"}, "error": None}
 
     engine = AssertionEngine(probe=probe)
-    result = evaluate(engine, {"id": "v", "type": "element_visible", "args": {"target": "#logout"}})
+    result = evaluate(engine, {"id": "v", "type": "element_visible", "args": {"target": "text=退出"}})
     assert result.passed
 
 

@@ -152,6 +152,23 @@ class RunRepository:
             ).fetchall()
         return [str(row["run_id"]) for row in rows]
 
+    def purge_finished_before(self, cutoff: str) -> list[str]:
+        """删除保留期之前的终态任务，返回需要同步清理的目录 id。"""
+        with self._connect() as db:
+            rows = db.execute(
+                """
+                SELECT run_id FROM runs
+                 WHERE status IN ('passed', 'failed', 'error', 'cancelled')
+                   AND finished_at != '' AND finished_at < ?
+                 ORDER BY run_id
+                """,
+                (cutoff,),
+            ).fetchall()
+            run_ids = [str(row["run_id"]) for row in rows]
+            if run_ids:
+                db.executemany("DELETE FROM runs WHERE run_id = ?", [(item,) for item in run_ids])
+        return run_ids
+
     @staticmethod
     def _decode(row: sqlite3.Row) -> dict[str, Any]:
         result = dict(row)

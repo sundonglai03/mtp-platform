@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import queue
+import shutil
 import threading
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -227,11 +229,13 @@ class JobManager:
         artifacts_root: Path,
         config_path: str | None,
         max_workers: int = 1,
+        retention_days: int = 14,
     ) -> None:
         self.repository = repository
         self.artifacts_root = artifacts_root.resolve()
         self.config_path = config_path
         self.max_workers = max(1, max_workers)
+        self.retention_days = max(1, retention_days)
         self._queue: queue.Queue[str | None] = queue.Queue()
         self._stop = threading.Event()
         self._accepting = False
@@ -241,6 +245,7 @@ class JobManager:
 
     def start(self) -> None:
         self.repository.recover_interrupted()
+        self._purge_expired()
         self._accepting = True
         for index in range(self.max_workers):
             worker = threading.Thread(target=self._worker, name=f"mtp-job-{index + 1}", daemon=True)
@@ -248,6 +253,13 @@ class JobManager:
             self._workers.append(worker)
         for run_id in self.repository.queued_ids():
             self._queue.put(run_id)
+
+    def _purge_expired(self) -> None:
+        """清除超过保留期的 SQLite 结果、上传文件和证据。"""
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=self.retention_days)).isoformat()
+        for run_id in self.repository.purge_finished_before(cutoff):
+            shutil.rmtree(self.artifacts_root / "uploads" / run_id, ignore_errors=True)
+            shutil.rmtree(self.artifacts_root / "runs" / run_id, ignore_errors=True)
 
     def stop(self) -> None:
         self._accepting = False
@@ -263,6 +275,9 @@ class JobManager:
     def submit(self, *, run_id: str, uploads: list[Path], allow_write: bool) -> None:
         if not self._accepting:
             raise RuntimeError("服务正在关闭，不能接收新任务")
+        # 常驻服务可能数月不重启；每次接收任务时顺手执行一次轻量清理，
+        # 避免 retention_days 只在容器启动时生效。
+        self._purge_expired()
         self.repository.create(
             run_id=run_id,
             uploads=[str(path) for path in uploads],

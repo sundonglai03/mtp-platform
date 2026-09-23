@@ -162,6 +162,8 @@ class ApiTool(BaseTool):
         url = self._resolve_url(args, context)
         # 动作名不一定等于 HTTP 方法：download 就是 GET（以前这里直接取 action，
         # 于是请求以 `DOWNLOAD /path HTTP/1.1` 发出去，真服务器只会回 405/501）。
+        if action == "request" and not args.get("method"):
+            raise ConfigError("api.request 缺少 method", adapter=self.name, action=action)
         method = str(args.get("method") or ("GET" if action == "download" else action)).upper()
         timeout = float(args.get("timeout_sec") or 30)
 

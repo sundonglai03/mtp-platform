@@ -34,18 +34,6 @@ SCALAR_KEYS = {
     "page_text_contains": ("page_text", "text", "body"),
 }
 
-_VISIBILITY_JS = """() => {
-  const sel = %s;
-  const el = document.querySelector(sel);
-  if (!el) return { visible: false, reason: 'not-found' };
-  const style = window.getComputedStyle(el);
-  const rect = el.getBoundingClientRect();
-  const visible = style.display !== 'none' && style.visibility !== 'hidden'
-      && style.opacity !== '0' && rect.width > 0 && rect.height > 0;
-  return { visible, reason: visible ? 'ok' : 'not-rendered' };
-}"""
-
-
 @dataclass
 class AssertionResult:
     id: str
@@ -216,6 +204,8 @@ class AssertionEngine:
         expected = self._resolve_arg(a, "expected", ctx)
         if isinstance(actual, (list, tuple, set)):
             passed = any(self._compare_equality(item, expected) for item in actual)
+        elif isinstance(actual, dict):
+            passed = any(self._compare_equality(key, expected) for key in actual)
         elif isinstance(actual, str):
             passed = str(expected) in actual
         elif actual is None:
@@ -367,7 +357,7 @@ class AssertionEngine:
                 id=aid,
                 type="element_visible",
                 passed=False,
-                message="element_visible 需要 args.target（CSS 选择器）",
+                message="element_visible 需要 args.target（Playwright 选择器）",
             )
         target = str(resolve(target, ctx))
 
@@ -382,38 +372,31 @@ class AssertionEngine:
                 error="probe-unavailable",
             )
 
-        timeout_ms = int(args.get("timeout_ms", 0) or 0)
-        deadline = time.monotonic() + timeout_ms / 1000
-        last: dict[str, Any] = {}
-        while True:
-            probed = self.probe(
-                "playwright.evaluate",
-                {"function": _VISIBILITY_JS % json.dumps(target)},
-            )
-            if not probed.get("ok"):
-                return AssertionResult(
-                    id=aid,
-                    type="element_visible",
-                    passed=False,
-                    expected=True,
-                    message=f"查询元素可见性失败: {probed.get('error') or '未知错误'}",
-                    error=str(probed.get("error") or ""),
-                )
-            last = probed.get("data", {}).get("json") or {}
-            if last.get("visible") or time.monotonic() >= deadline:
-                break
-            time.sleep(0.2)
-
-        passed = bool(last.get("visible"))
+        probe_args: dict[str, Any] = {"target": target}
+        if args.get("timeout_ms") is not None:
+            probe_args["timeout"] = max(1, int(args["timeout_ms"]))
+        probed = self.probe(
+            "playwright.wait_for",
+            probe_args,
+        )
+        passed = bool(probed.get("ok"))
+        failure = probed.get("error") or "not-visible"
+        if passed:
+            detail = "ok"
+        elif isinstance(failure, dict):
+            detail = str(failure.get("message") or failure.get("code") or "not-visible")
+        else:
+            detail = str(failure)
         return AssertionResult(
             id=aid,
             type="element_visible",
             passed=passed,
-            actual=last,
+            actual={"visible": passed, "reason": detail},
             expected={"visible": True},
             message=self._message(
-                a, passed, f"元素 {target!r} 应可见（实际: {last.get('reason', 'unknown')}）"
+                a, passed, f"元素 {target!r} 应可见（实际: {detail}）"
             ),
+            error=None if passed else detail,
         )
 
     def _assert_file_exists(self, a, ctx, aid) -> AssertionResult:

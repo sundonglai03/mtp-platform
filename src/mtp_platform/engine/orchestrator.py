@@ -577,7 +577,7 @@ class TestRunner:
             )
 
     # ------------------------------------------------------------------
-    # 证据：只采截图
+    # 证据：截图与文本快照
     # ------------------------------------------------------------------
     def _collect_evidence(
         self,
@@ -587,18 +587,19 @@ class TestRunner:
         case: dict[str, Any],
         run_id: str,
     ) -> None:
-        """按当前策略采集证据：能截图的截一张，截不了的不留文字。
+        """按声明采集浏览器截图或文本快照。
 
-        - 浏览器步骤只要声明了 `evidence`（写 screenshot，还是写成
-          snapshot / console / network 都一样）就截一张 PNG；
+        - `screenshot` 保存 PNG；`snapshot` 保存页面标题、URL 与可见文本；
         - ssh / mysql / http 这类截不了图的步骤不再落 stdout/stderr 文本，
           步骤产出在「步骤输出」里仍然可见，只是不再另存证据文件。
         """
         if not record.action.startswith("playwright."):
             return
-        if not list(step.get("evidence") or []):
-            return
-        self._screenshot(store, case, run_id, record.step_id, "screenshot")
+        requested = {str(item) for item in (step.get("evidence") or [])}
+        if "screenshot" in requested:
+            self._screenshot(store, case, run_id, record.step_id, "screenshot")
+        if "snapshot" in requested:
+            self._snapshot(store, case, run_id, record.step_id, "snapshot")
 
     def _capture_failure(
         self, record: StepResult, store: EvidenceStore, case: dict[str, Any], run_id: str
@@ -614,10 +615,17 @@ class TestRunner:
         if not self.registry.is_active("playwright"):
             return
 
+        errors: list[str] = []
         try:
             self._screenshot(store, case, run_id, record.step_id, f"failure-{record.step_id}")
         except Exception as exc:  # noqa: BLE001
-            record.data.setdefault("evidence_warning", f"无法采集失败截图: {exc}")
+            errors.append(f"截图: {exc}")
+        try:
+            self._snapshot(store, case, run_id, record.step_id, f"failure-{record.step_id}")
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"快照: {exc}")
+        if errors:
+            record.data.setdefault("evidence_warning", f"无法采集失败证据: {'；'.join(errors)}")
 
     def _screenshot(
         self,
@@ -646,6 +654,33 @@ class TestRunner:
             if isinstance(item, dict) and item.get("type") == "image" and item.get("_base64"):
                 store.save_base64("screenshot", case_id, step_id, name, item["_base64"], ext=".png")
                 return
+
+    def _snapshot(
+        self,
+        store: EvidenceStore,
+        case: dict[str, Any],
+        run_id: str,
+        step_id: str,
+        name: str,
+    ) -> None:
+        """把 Playwright snapshot 的可读文本保存为证据。"""
+        case_id = str(case.get("id"))
+        adapter = self.registry.get("playwright")
+        ctx = StepContext(
+            run_id=run_id,
+            case_id=case_id,
+            step_id=step_id,
+            env=dict(case.get("environment") or {}),
+        )
+        outcome = self._invoke_adapter(
+            "playwright", adapter.do_execute, "snapshot", {}, ctx
+        )
+        if not outcome.ok:
+            raise RuntimeError(outcome.summary)
+        text = str(outcome.data.get("text") or outcome.data.get("page_text") or "")
+        store.save_text(
+            "snapshot", case_id, step_id, name, text, ext=".txt", summary="页面文本快照"
+        )
 
     # ------------------------------------------------------------------
     # 断言与清理
