@@ -309,3 +309,30 @@ def test_engine_is_deterministic():
     assertion = {"id": "d", "type": "equals", "actual": 1, "expected": 1}
     results = {evaluate(engine, assertion).passed for _ in range(20)}
     assert results == {True}
+
+
+def test_unresolved_reports_skipped_step_not_variable_error():
+    """引用的步骤被跳过时不能报「变量未定义」（实测单用例套件里 15 条断言被这样误报）。"""
+    from mtp_platform.engine.assertions import AssertionEngine
+
+    engine = AssertionEngine.__new__(AssertionEngine)  # 只测结论生成，不建实例
+    skipped = engine._unresolved(
+        {"id": "a1", "type": "exit_code", "actual": "{{ steps.landing-s1.exit_code }}"},
+        {"steps": {}},
+        "a1",
+        "exit_code",
+        "major",
+        RuntimeError("变量未定义: {{ steps.landing-s1.exit_code }}"),
+    )
+    assert skipped.error == "step_not_run"
+    assert "landing-s1" in skipped.message and "未执行" in skipped.message
+
+    other = engine._unresolved(
+        {"id": "b", "type": "contains", "actual": "x"},
+        {"steps": {"s1": {"out": "y"}}},
+        "b",
+        "contains",
+        "minor",
+        RuntimeError("别的错误"),
+    )
+    assert other.error.startswith("RuntimeError")

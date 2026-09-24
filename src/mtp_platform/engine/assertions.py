@@ -96,14 +96,7 @@ class AssertionEngine:
         try:
             result = self._dispatch(assertion, context, aid, atype, path)
         except Exception as exc:  # noqa: BLE001 - 断言自身出错不能炸掉整轮
-            result = AssertionResult(
-                id=aid,
-                type=atype,
-                passed=False,
-                message=f"断言执行出错: {type(exc).__name__}: {exc}",
-                severity=severity,
-                error=f"{type(exc).__name__}: {exc}",
-            )
+            result = self._unresolved(assertion, context, aid, atype, severity, exc)
 
         result.severity = severity
         result.duration_ms = int((time.monotonic() - started) * 1000)
@@ -114,6 +107,77 @@ class AssertionEngine:
         return result
 
     # -- 内部 ---------------------------------------------------------------
+    @staticmethod
+    def _step_refs(assertion: dict[str, Any]) -> list[str]:
+        """从断言里找出它引用的步骤 id（`{{ steps.<id>.<字段> }}`）。"""
+        found: list[str] = []
+
+        def walk(node: Any) -> None:
+            if isinstance(node, str):
+                for chunk in node.split("steps.")[1:]:
+                    name = ""
+                    for char in chunk:
+                        if char.isalnum() or char in "_-":
+                            name += char
+                        else:
+                            break
+                    if name:
+                        found.append(name)
+            elif isinstance(node, dict):
+                for value in node.values():
+                    walk(value)
+            elif isinstance(node, (list, tuple)):
+                for value in node:
+                    walk(value)
+
+        walk(assertion)
+        return found
+
+    def _unresolved(
+        self,
+        assertion: dict[str, Any],
+        context: dict[str, Any],
+        aid: str,
+        atype: str,
+        severity: str,
+        exc: Exception,
+    ) -> AssertionResult:
+        """断言取不到值时的结论：先分清「步骤没跑到」还是「变量真错了」。
+
+        实测（单用例端到端套件）：某一步失败后，后面 15 条断言全报
+        `VariableResolutionError: 变量未定义: {{ steps.landing-0ctl-s1.exit_code }}`——
+        看着像用例把变量写错了，其实是那些步骤**被跳过、压根没输出**。
+        步骤 id 拼错在校验阶段就被拦掉了，运行时不存在；所以这里的「取不到」只可能是没跑到。
+        """
+        steps = context.get("steps") if isinstance(context, dict) else None
+        if isinstance(steps, dict):
+            skipped = [
+                step_id
+                for step_id in dict.fromkeys(self._step_refs(assertion))
+                if step_id not in steps or not steps.get(step_id)
+            ]
+            if skipped:
+                names = "、".join(skipped)
+                return AssertionResult(
+                    id=aid,
+                    type=atype,
+                    passed=False,
+                    message=(
+                        f"断言未执行：引用的步骤 {names} 本轮没有输出"
+                        "（未执行或前序失败后被跳过），无法取值——不是变量拼错"
+                    ),
+                    severity=severity,
+                    error="step_not_run",
+                )
+        return AssertionResult(
+            id=aid,
+            type=atype,
+            passed=False,
+            message=f"断言执行出错: {type(exc).__name__}: {exc}",
+            severity=severity,
+            error=f"{type(exc).__name__}: {exc}",
+        )
+
     def _scrub(self, value: Any) -> Any:
         return redact(
             value,
