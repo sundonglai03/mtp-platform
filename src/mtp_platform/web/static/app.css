@@ -25,6 +25,8 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .danger-button { background: #b42318; }
 .danger { color: #9f2118; }
 .warning { color: #8a5000; background: #fff7df; border-radius: 7px; padding: 10px 12px; }
+.diagnosis { background: #edf4ff; color: #1849a9; border-radius: 7px; padding: 11px 13px; margin: 10px 0 16px; }
+.diagnosis p { margin: 5px 0 0; }
 .muted { color: #667085; }
 .alert { border-radius: 7px; padding: 11px 13px; margin-bottom: 16px; }
 .error { background: #feeceb; color: #9f2118; }

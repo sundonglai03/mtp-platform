@@ -42,11 +42,92 @@ def _clip(node: Any) -> Any:
     return node
 
 
-def _failure_ref(result: CaseResult) -> dict[str, str] | None:
+def _failure_diagnosis(
+    result: CaseResult, failure: dict[str, Any] | None
+) -> dict[str, str] | None:
+    """给失败表现分类，不把断言失败直接说成被测程序缺陷。"""
+    if not failure:
+        return None
+    if result.status.value == "cancelled":
+        return {
+            "category": "cancelled",
+            "label": "任务已取消",
+            "responsibility": "用户操作",
+            "guidance": "如需继续，请重新提交任务。",
+        }
+
+    kind = str(failure.get("kind") or "case")
+    error = failure.get("error") or result.error or {}
+    error_data = error if isinstance(error, dict) else {}
+    code = str(error_data.get("code") or "")
+    action = str(failure.get("action") or error_data.get("action") or "")
+    phase = str(failure.get("phase") or "")
+
+    if kind == "assertion":
+        return {
+            "category": "assertion_mismatch",
+            "label": "断言与实际结果不符",
+            "responsibility": "归属待核对",
+            "guidance": "核对被测结果、断言预期和用例前置数据；单凭断言失败不能判定为产品缺陷。",
+        }
+    if code in {"case_invalid", "invalid_resolved_arg"}:
+        return {
+            "category": "case_definition",
+            "label": "用例定义或参数有误",
+            "responsibility": "用例",
+            "guidance": "检查字段、变量引用及变量解析后的参数值。",
+        }
+    if phase in {"fixtures", "preconditions"}:
+        return {
+            "category": "precondition_failure",
+            "label": "前置数据或条件未建立",
+            "responsibility": "归属待核对",
+            "guidance": "先确认准备步骤的目标、凭证和数据状态；后续业务断言不能据此判产品缺陷。",
+        }
+    if code in {"auth_failed", "network_error"}:
+        return {
+            "category": "environment_or_credentials",
+            "label": "连接或认证失败",
+            "responsibility": "环境或凭证待核对",
+            "guidance": "检查服务可达性、目标地址、账号权限和用例中的凭证。",
+        }
+    if code == "timeout" and (
+        action.startswith("playwright.") or error_data.get("adapter") == "playwright"
+    ):
+        return {
+            "category": "browser_automation_timeout",
+            "label": "浏览器操作超时",
+            "responsibility": "归属待核对",
+            "guidance": "结合页面快照检查目标是否存在且可见、页面是否仍在跳转，以及前置数据是否已出现。",
+        }
+    if code == "timeout":
+        return {
+            "category": "operation_timeout",
+            "label": "工具操作超时",
+            "responsibility": "环境、目标或工具待核对",
+            "guidance": "结合步骤输出检查目标服务响应、网络状态和超时设置。",
+        }
+    if result.status.value == "error" or kind == "case":
+        return {
+            "category": "execution_error",
+            "label": "执行异常",
+            "responsibility": "平台或工具待核对",
+            "guidance": "查看异常码、步骤原始数据和平台日志，确认是执行器还是适配工具抛错。",
+        }
+    return {
+        "category": "step_failure",
+        "label": "步骤执行失败",
+        "responsibility": "归属待核对",
+        "guidance": "结合步骤阶段、错误详情和证据确认用例、工具或目标系统原因。",
+    }
+
+
+def _failure_ref(result: CaseResult) -> dict[str, Any] | None:
     """用例的第一个失败点，压成适合列表展示的短结构。"""
     failure = result.first_failure()
     if not failure:
         return None
+    diagnosis = _failure_diagnosis(result, failure)
     kind = str(failure.get("kind") or "case")
     if kind == "step":
         error = failure.get("error") or {}
@@ -54,6 +135,7 @@ def _failure_ref(result: CaseResult) -> dict[str, str] | None:
             "kind": "step",
             "step_id": str(failure.get("step_id") or ""),
             "message": str(failure.get("summary") or error.get("message") or "步骤失败"),
+            "diagnosis": diagnosis,
         }
     if kind == "assertion":
         return {
@@ -63,8 +145,14 @@ def _failure_ref(result: CaseResult) -> dict[str, str] | None:
                 failure.get("message")
                 or f"断言 {failure.get('id')} 期望 {failure.get('expected')!r}，实际 {failure.get('actual')!r}"
             ),
+            "diagnosis": diagnosis,
         }
-    return {"kind": kind, "step_id": "", "message": str(failure.get("message") or "用例执行失败")}
+    return {
+        "kind": kind,
+        "step_id": "",
+        "message": str(failure.get("message") or "用例执行失败"),
+        "diagnosis": diagnosis,
+    }
 
 
 def _case_result(result: CaseResult) -> dict[str, Any]:
@@ -166,6 +254,7 @@ def _case_details(results: list[CaseResult]) -> dict[str, dict[str, Any]]:
             "cleanup": cleanup,
             "warnings": [_clip_text(str(item)) for item in result.warnings],
             "error": _clip(result.error),
+            "diagnosis": _failure_diagnosis(result, result.first_failure()),
             "evidence": _attach_evidence_urls(result.run_id, result.evidence),
         }
         if len(json_safe.dumps(detail)) > DETAIL_CASE_LIMIT:
@@ -176,7 +265,7 @@ def _case_details(results: list[CaseResult]) -> dict[str, dict[str, Any]]:
     return details
 
 
-def _first_failure(results: list[CaseResult]) -> dict[str, str | None] | None:
+def _first_failure(results: list[CaseResult]) -> dict[str, Any] | None:
     for result in results:
         if result.passed:
             continue
@@ -190,6 +279,7 @@ def _first_failure(results: list[CaseResult]) -> dict[str, str | None] | None:
                 or (result.error or {}).get("message")
                 or "用例执行失败"
             ),
+            "diagnosis": _failure_diagnosis(result, failure),
         }
     return None
 
@@ -394,7 +484,17 @@ class JobManager:
                 finished_at=now_iso(),
                 error=message,
                 first_failure_json=json_safe.dumps(
-                    {"case_id": None, "step_id": None, "message": message},
+                    {
+                        "case_id": None,
+                        "step_id": None,
+                        "message": message,
+                        "diagnosis": {
+                            "category": "platform_exception",
+                            "label": "平台任务处理异常",
+                            "responsibility": "平台",
+                            "guidance": "查看服务日志和任务数据写入过程；这是任务执行边界捕获的未处理异常。",
+                        },
+                    },
                 ),
             )
         finally:

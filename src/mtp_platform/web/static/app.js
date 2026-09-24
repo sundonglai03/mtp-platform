@@ -311,6 +311,10 @@ if (detail) {
   function renderCaseDetail(payload, caseId) {
     const steps = payload.steps || [];
     const cleanup = payload.cleanup || [];
+    const diagnosis = payload.diagnosis;
+    const diagnosisBlock = diagnosis
+      ? `<div class="diagnosis"><strong>原因初判：${escapeHtml(diagnosis.label)}</strong><span>（${escapeHtml(diagnosis.responsibility)}）</span><p>${escapeHtml(diagnosis.guidance)}</p></div>`
+      : "";
     const assertions = (payload.assertions || []).map((item) => `<tr>
       <td><code>${escapeHtml(item.id)}</code><div class="muted">${escapeHtml(item.type || "")}</div></td>
       <td><span class="status status-${item.passed ? "passed" : "failed"}">${item.passed ? "通过" : "失败"}</span></td>
@@ -323,7 +327,7 @@ if (detail) {
       ? `<h3>告警</h3><ul>${payload.warnings.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`
       : "";
 
-    return `${payload.error?.message ? `<div class="alert error">${escapeHtml(payload.error.message)}</div>` : ""}
+    return `${diagnosisBlock}${payload.error?.message ? `<div class="alert error">${escapeHtml(payload.error.message)}</div>` : ""}
       <h3>步骤（${steps.length}）</h3>
       ${renderSteps(caseId, steps, "无步骤。")}
       <h3>断言</h3>
@@ -386,7 +390,7 @@ if (detail) {
       const failed = item.counts?.assertions_failed || 0;
       const failure = item.first_failure;
       const hint = failure
-        ? `<span class="failure-hint">${escapeHtml(failure.step_id ? `${failure.step_id}: ` : "")}${escapeHtml(failure.message)}</span>`
+        ? `<span class="failure-hint">${failure.diagnosis ? `${escapeHtml(failure.diagnosis.label)}（${escapeHtml(failure.diagnosis.responsibility)}） · ` : ""}${escapeHtml(failure.step_id ? `${failure.step_id}: ` : "")}${escapeHtml(failure.message)}</span>`
         : "";
       return `<details class="case-item" data-case-id="${escapeAttr(item.case_id)}"${openCases.has(item.case_id) ? " open" : ""}>
         <summary>
@@ -429,7 +433,10 @@ if (detail) {
       ? `服务端计时：started_at=${run.started_at} finished_at=${run.finished_at || "(未结束)"}`
       : "";
     const error = document.getElementById("run-error");
-    error.textContent = run.first_failure?.message || "";
+    const failureDiagnosis = run.first_failure?.diagnosis;
+    error.textContent = run.first_failure
+      ? `${failureDiagnosis ? `原因初判：${failureDiagnosis.label}（${failureDiagnosis.responsibility}）。` : ""}${run.first_failure.message || ""}`
+      : "";
     error.classList.toggle("hidden", !run.first_failure);
     renderCases(run.cases || []);
     document.getElementById("cancel-run").disabled = terminal.has(run.status);
