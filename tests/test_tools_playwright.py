@@ -274,7 +274,7 @@ def test_click_timeout_reports_what_is_really_on_the_page(config):
             return _Locator()
 
         def evaluate(self, expression, arg):
-            return ['input#submi.Submit  "登录"']
+            return [{"html": 'input#submi  "登录"', "usable": True, "why": ""}]
 
         def click(self, selector, timeout=None):
             raise PWTimeout("Page.click: Timeout 15000ms exceeded.")

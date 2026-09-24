@@ -326,6 +326,23 @@ class AssertionEngine:
             message=self._message(a, passed, detail),
         )
 
+    @staticmethod
+    def _text_preview(text: str, expected: Any = None, limit: int = 240) -> str:
+        """断言失败时给页面文本的**预览**，而不是只报字符数。
+
+        实测教训：`<page_text 724 chars>` 配上报错「页面文本应包含 '申请成功'」，
+        看着像环境问题；实际页面写的是「处理完成:成功 0，失败 1」——正文不给出来，
+        就只能去翻截图猜。命中时给命中处的上下文，未命中时给开头一段。
+        """
+        flat = " ".join(text.split())
+        if expected:
+            position = flat.find(str(expected))
+            if position >= 0:
+                start = max(0, position - 60)
+                return f"页面文本 {len(text)} 字，命中处：…{flat[start:start + limit]}…"
+        body = flat[:limit] + ("…" if len(flat) > limit else "")
+        return f"页面文本 {len(text)} 字：{body}"
+
     def _assert_page_text_contains(self, a, ctx, aid) -> AssertionResult:
         raw = self._resolve_arg(a, "source", ctx)
         args = a.get("args") or {}
@@ -344,7 +361,7 @@ class AssertionEngine:
             id=aid,
             type="page_text_contains",
             passed=passed,
-            actual="<page_text %d chars>" % len(haystack),
+            actual=self._text_preview(haystack, expected) if not passed else "<page_text %d chars>" % len(haystack),
             expected=expected,
             message=self._message(a, passed, f"页面文本应包含 {expected!r}"),
         )

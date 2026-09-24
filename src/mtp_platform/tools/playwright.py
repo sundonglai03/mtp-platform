@@ -194,16 +194,23 @@ class PlaywrightTool(BaseTool):
             lines = [
                 f"原选择器命中 {hits} 个元素：{target}" if hits is not None else f"原选择器无法解析：{target}"
             ]
-            candidates = _visible_candidates(page, hint)
-            if candidates:
+            candidates = _text_candidates(page, hint)
+            usable = [item for item in candidates if item.get("usable")]
+            if usable:
                 lines.append(
-                    f"页面上含文本「{hint}」的可见元素（建议改用 text={hint}）："
+                    f"页面上含文本「{hint}」的可点元素（建议改用 text={hint}）："
                     if hint
-                    else "页面上可见的可点元素："
+                    else "页面上可点的元素："
                 )
-                lines.extend(f"  - {item}" for item in candidates)
-            else:
-                lines.append("页面上没有找到可见的可点元素（可能还没渲染完，或目标在 iframe 里）")
+                lines.extend(f"  - {item['html']}" for item in usable)
+            blocked = [item for item in candidates if not item.get("usable")]
+            if blocked:
+                lines.append("同文本但**点不到**的元素（选择器没错，是它当前不可操作）：")
+                lines.extend(
+                    f"  - {item['html']}（{item.get('why') or '不可点'}）" for item in blocked
+                )
+            if not candidates:
+                lines.append("页面上没有找到含该文本的元素（可能还没渲染完，或目标在 iframe 里）")
             return "\n".join(lines)
         except Exception as exc:  # noqa: BLE001 - 诊断失败不能盖住原本的超时
             return f"（诊断信息生成失败：{type(exc).__name__}: {exc}）"
@@ -403,32 +410,42 @@ def _text_hint(target: str) -> str:
 
 
 _JS_CANDIDATES = """([hint, limit]) => {
-  const visible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
   const out = [];
   const nodes = document.querySelectorAll('button, a, input, span, li, label, div[role="button"]');
   for (const el of nodes) {
     const text = ((el.innerText || '') + ' ' + (el.value || '')).replace(/\\s+/g, ' ').trim();
     if (!text || text.length > 40) continue;
     if (hint && text.indexOf(hint) < 0) continue;
-    if (!visible(el)) continue;
+    const rect = el.getBoundingClientRect();
+    const style = window.getComputedStyle(el);
+    const usable = rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
     const id = el.id ? '#' + el.id : '';
     const cls = (el.className && typeof el.className === 'string')
       ? '.' + el.className.trim().split(/\\s+/).slice(0, 2).join('.')
       : '';
-    out.push(el.tagName.toLowerCase() + id + cls + '  "' + text.slice(0, 24) + '"');
+    out.push({
+      html: el.tagName.toLowerCase() + id + cls + '  "' + text.slice(0, 24) + '"',
+      usable: usable,
+      why: usable ? '' : (el.disabled ? 'disabled' : (rect.width <= 0 || rect.height <= 0 ? '尺寸为 0' : '被隐藏')),
+    });
     if (out.length >= limit) break;
   }
   return out;
 }"""
 
 
-def _visible_candidates(page: Any, hint: str, limit: int = 8) -> list[str]:
-    """列出可见候选元素（有文本提示时按文本过滤），把 DOM 事实交给用例作者。"""
+def _text_candidates(page: Any, hint: str, limit: int = 8) -> list[dict[str, Any]]:
+    """列出含该文本的候选元素，**连点不到的也列**并说明原因。
+
+    cert-07 的实测教训：`text=线上申请` 命中 1 个元素却点不到（不可见），旧诊断只说
+    「没有找到可见的可点元素」，看着像选择器写错——其实选择器是对的，问题在那行数据
+    不可操作。把元素本身与不可点原因一并给出，结论才立得住。
+    """
     try:
         result = page.evaluate(_JS_CANDIDATES, [hint, limit])
     except Exception:  # noqa: BLE001 - 诊断失败不影响主流程
         return []
-    return [str(item) for item in (result or [])]
+    return [item for item in (result or []) if isinstance(item, dict)]
 
 
 def _target(args: dict[str, Any]) -> str:
